@@ -1,0 +1,54 @@
+# Linux用AVR用Makefile
+
+include config.mk
+
+NVCCFLAGS = -use_fast_math -m64 -O3 --compiler-options "-Wall"
+CXXFLAGS  = -Wno-unused-result -Wno-write-strings
+R_CFLAGS  = -O3
+D_CFLAGS  = -g
+
+LINK	= -L/usr/local/cuda/lib64 -lcudart -lopencv_core -lopencv_highgui -lopencv_video -lopencv_objdetect -lopencv_ml -lopencv_imgproc
+INCLUDE = -I/usr/local/cuda/include -I/usr/local/include/opencv2 -I/usr/include/opencv2
+
+# 環境定数
+
+MAKEFILE = linmake
+MAKE     = make -r
+NVCC     = nvcc
+CC       = g++
+
+# 規則
+
+%.o : %.cu 
+	$(NVCC) $(ARCH) $(NVCCFLAGS) -c $<
+
+%.o : %.cpp
+	$(CC) $(CXXFLAGS) $(INCLUDE) -c $<
+
+all : $(TARGET)
+
+.PHONY: debug  
+debug: CXXFLAGS+=$(D_CFLAGS)  
+debug: $(TARGET)
+
+.PHONY: release  
+release: CXXFLAGS+=$(R_CFLAGS)
+release: $(TARGET)
+
+$(TARGET) : $(SOURCES:.cpp=.o) $(CUSOURCES:.cu=.o)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SOURCES:.cpp=.o) $(CUSOURCES:.cu=.o) $(LINK)
+
+run : $(TARGET)
+	./$(TARGET)
+
+clean :
+	-rm $(SOURCES:.cpp=.o)
+	-rm $(CUSOURCES:.cu=.o)
+
+remake :
+	$(MAKE) -f$(MAKEFILE) -B
+
+src_only :
+	-rm $(TARGET)
+	$(MAKE) -f$(MAKEFILE) clean
+

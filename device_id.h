@@ -1,0 +1,18 @@
+#ifndef DEVICE_ID_H_INCLUDED
+#define DEVICE_ID_H_INCLUDED
+
+typedef enum {
+    ID_ADXL345,
+    ID_LPS331AP,
+    ID_LPS331AP_TEMP,
+    ID_L3GD20,
+    ID_HMC5883L,
+    ID_MPU9150_GYRO,
+    ID_MPU9150_ACC,
+    ID_MPU9150_TEMP,
+    ID_AK8975,
+    ID_GPS,
+    DEVICE_COUNT,
+} SensorDeviceId;
+
+#endif
