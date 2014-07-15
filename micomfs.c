@@ -79,7 +79,7 @@ char micomfs_format( MicomFS *fs, uint16_t sector_size, uint32_t sector_count, u
     return 1;
 }
 
-char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name )
+char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t reserved_sector_count )
 {
     /* ファイル新規作成 ファイルは最小１セクタ消費する */
     MicomFSFile last;
@@ -111,11 +111,18 @@ char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name )
         fp->start_sector = 1 + fs->entry_count;
     }
 
+    /* Reserved sector count is greater than 0 and less than max_sector_count */
+    if ( reserved_sector_count < 1 ) {
+        reserved_sector_count = 1;
+    } else if ( reserved_sector_count > fp->max_sector_count ) {
+        reserved_sector_count = fp->max_sector_count;
+    }
+
     /* ファイル情報作成 */
     fp->current_sector = 0;
     fp->flag = MicomFSFileFlagNormal;
     fp->fs = fs;
-    fp->sector_count = 1;
+    fp->sector_count = reserved_sector_count;
     fp->current_sector = 0;
     fp->spos = 0;
     fp->status = MicomFSFileStatusStop;

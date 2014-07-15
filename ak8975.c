@@ -90,16 +90,16 @@ char ak8975_over_flow( AK8975Unit *unit )
 char ak8975_read( AK8975Unit *unit )
 {
     /* 測定結果読む */
-    uint8_t data[6];
+    int16_t data[3];
 
     if ( !i2c_read_register( unit->address, 0x03, data, 6, I2CPolling ) ) {
         return 0;
     }
 
     /* 分配 */
-    unit->x = *( (int16_t *)&data[0] );
-    unit->y = *( (int16_t *)&data[2] );
-    unit->z = *( (int16_t *)&data[4] );
+    unit->x = data[0];
+    unit->y = data[1];
+    unit->z = data[2];
 
     return 1;
 }

@@ -34,6 +34,7 @@
 #include <string.h>
 
 #define MICOMFS_SIGNATURE 0x5E
+#define MICOMFS_MAX_FILE_SECOTR_COUNT 0xFFFFFFFF
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,13 +52,13 @@ typedef enum {
     MicomFSFileModeWrite,
     MicomFSFileModeReadWrite,
 } MicomFSFileMode;
+*/
 
 typedef enum {
     MicomFSFileAccessModeNormal       = 1 << 0,
     MicomFSFileAccessModeAutoStop     = 1 << 1,
     MicomFSFileAccessModeAutoContinue = 1 << 2,
 } MicomFSFileAccessMode;
-*/
 
 typedef enum {
     MicomFSFileStatusStop,
@@ -100,7 +101,7 @@ typedef struct {
 char micomfs_init_fs( MicomFS *fs );
 char micomfs_format( MicomFS *fs, uint16_t sector_size, uint32_t sector_count, uint16_t entry_count, uint16_t used_entry_count );
 
-char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name );
+char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t reserved_sector_count );
 char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, const char *name );
 char micomfs_fclose( MicomFSFile *fp );
 

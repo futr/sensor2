@@ -173,7 +173,7 @@ int main( void )
         micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 10, 0 );
 
         /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "hellllll.txt" );
+        micomfs_fcreate( &fs, &fp, "hellllll.txt", MICOMFS_MAX_FILE_SECOTR_COUNT );
 
         /* 書きまくる */
         for ( i = 0; i < 5; i++ ) {
@@ -192,10 +192,10 @@ int main( void )
         micomfs_fclose( &fp );
 
         /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "foooo.txt" );
+        micomfs_fcreate( &fs, &fp, "foooo.txt", MICOMFS_MAX_FILE_SECOTR_COUNT );
 
         /* 書きまくる */
-        for( i = 0; micomfs_start_fwrite( &fp, i ); i++ ) {
+        for( i = 0; /*micomfs_start_fwrite( &fp, i )*/i < 10; i++ ) {
 
             for ( j = 0; j < fs.sector_size; j++ ) {
                 data = 0x3C;
@@ -212,7 +212,7 @@ int main( void )
         st7032i_puts( 1, 0, "Fyuu" );
 
         /* 第一セクター15バイトを全部USARTにぶちまける */
-        for ( i = 0; i < 6; i++ ) {
+        for ( i = 0; i < 10; i++ ) {
             sd_start_step_block_read( i );
 
             for ( j = 0; j < fs.sector_size; j++ ) {
