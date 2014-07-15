@@ -197,7 +197,7 @@ char micomfs_write_entry( MicomFSFile *fp )
 {
     /* エントリー書き出し */
     uint32_t i;
-    uint8_t data;
+    uint8_t data = 0;
 
     /* 指定エントリーにアクセス開始 */
     if ( !micomfs_dev_start_write( fp->fs, fp->entry_id + 1 ) ) {

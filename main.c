@@ -173,7 +173,7 @@ int main( void )
         micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 10, 0 );
 
         /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "hellllll.txt", MICOMFS_MAX_FILE_SECOTR_COUNT );
+        micomfs_fcreate( &fs, &fp, "hellllll.txt", 10 );
 
         /* 書きまくる */
         for ( i = 0; i < 5; i++ ) {
