@@ -89,7 +89,7 @@ char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t r
         return 0;
     }
 
-    /* 存在すれば現在の最終ファイル取得 */
+    /* ファイルがすでに存在すれば現在の最終ファイル取得 */
     if ( fs->used_entry_count ) {
         if ( !micomfs_read_entry( fs, &last, fs->used_entry_count - 1, NULL ) ) {
             return 0;
@@ -111,7 +111,7 @@ char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t r
         fp->start_sector = 1 + fs->entry_count;
     }
 
-    /* Reserved sector count is greater than 0 and less than max_sector_count */
+    /* Reserved sector count must be larger than 0 and less than max_sector_count */
     if ( reserved_sector_count < 1 ) {
         reserved_sector_count = 1;
     } else if ( reserved_sector_count > fp->max_sector_count ) {
@@ -130,6 +130,9 @@ char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t r
 
     /* エントリー書き出し */
     micomfs_write_entry( fp );
+
+    /* セクター数を1に */
+    fp->sector_count = 1;
 
     /* エントリー追加 */
     fs->used_entry_count++;
@@ -247,15 +250,12 @@ char micomfs_fclose( MicomFSFile *fp )
     /* もしアクセス中なら停止させる */
     if ( fp->status == MicomFSFileStatusRead ) {
         micomfs_stop_fread( fp );
-    } else if ( fp->status == MicomFSFileStatusRead ) {
+    } else if ( fp->status == MicomFSFileStatusWrite ) {
         micomfs_stop_fwrite( fp, 0 );
     }
 
     /* エントリーを書き込む */
     micomfs_write_entry( fp );
-
-    /* ファイル情報操作 */
-    fp->status = MicomFSFileStatusStop;
 
     return 1;
 }
@@ -265,23 +265,24 @@ char micomfs_start_fwrite( MicomFSFile *fp, uint32_t sector )
     /* 書きこみ開始 */
 
     /* 最大セクター数を超えてたら失敗 */
-    if ( fp->max_sector_count >= sector ) {
+    if ( fp->max_sector_count <= sector ) {
         return 0;
     }
 
     /* 指定セクターが現在のセクター数を超えていれば拡張 */
-    if ( fp->sector_count >= sector ) {
+    if ( fp->sector_count <= sector ) {
         fp->sector_count = sector + 1;
     }
+
+    /* 書き込みモード */
+    fp->status = MicomFSFileStatusWrite;
 
     /* カーソル設定 */
     fp->current_sector = sector;
     fp->spos = 0;
 
     /* 開始 */
-    micomfs_dev_start_write( fp->fs, sector + fp->start_sector );
-
-    return 1;
+    return micomfs_dev_start_write( fp->fs, sector + fp->start_sector );
 }
 
 char micomfs_start_fread( MicomFSFile *fp, uint32_t sector )
@@ -289,18 +290,19 @@ char micomfs_start_fread( MicomFSFile *fp, uint32_t sector )
     /* 読み込み開始 */
 
     /* セクター数を超えてたら失敗 */
-    if ( fp->sector_count >= sector ) {
+    if ( fp->sector_count <= sector ) {
         return 0;
     }
+
+    /* 読み込みモード */
+    fp->status = MicomFSFileStatusRead;
 
     /* カーソル設定 */
     fp->current_sector = sector;
     fp->spos = 0;
 
     /* 開始 */
-    micomfs_dev_start_read( fp->fs, sector + fp->start_sector );
-
-    return 1;
+    return micomfs_dev_start_read( fp->fs, sector + fp->start_sector );
 }
 
 char micomfs_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
@@ -330,16 +332,19 @@ char micomfs_stop_fwrite( MicomFSFile *fp, uint8_t fill )
     /* 下記を終了 */
     uint32_t i;
     uint8_t data;
+    char ret;
 
     /* まだ書き残しがあればfillで埋める */
-    for ( i = fp->spos; i < fp->fs->sector_size; i++ ) {
+    for ( i = fp->spos; i < fp->fs->dev_sector_size; i++ ) {
         micomfs_dev_write( fp->fs, &data, 1 );
     }
 
     /* 書き終了 */
-    micomfs_dev_stop_write( fp->fs );
+    ret = micomfs_dev_stop_write( fp->fs );
 
-    return 1;
+    fp->status = MicomFSFileStatusStop;
+
+    return ret;
 }
 
 char micomfs_stop_fread( MicomFSFile *fp )
@@ -347,16 +352,19 @@ char micomfs_stop_fread( MicomFSFile *fp )
     /* 読みを終了 */
     uint32_t i;
     uint8_t data;
+    char ret;
 
     /* まだ読み残しがあれば捨てる */
-    for ( i = fp->spos; i < fp->fs->sector_size; i++ ) {
+    for ( i = fp->spos; i < fp->fs->dev_sector_size; i++ ) {
         micomfs_dev_read( fp->fs, &data, 1 );
     }
 
     /* 読み終了 */
-    micomfs_dev_stop_read( fp->fs );
+    ret = micomfs_dev_stop_read( fp->fs );
 
-    return 1;
+    fp->status = MicomFSFileStatusStop;
+
+    return ret;
 }
 
 uint16_t micomfs_get_file_spos( MicomFSFile *fp )

@@ -170,13 +170,13 @@ int main( void )
         int j;
 
         /* フォーマット */
-        micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 10, 0 );
+        micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 4, 0 );
 
         /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "hellllll.txt", 10 );
+        micomfs_fcreate( &fs, &fp, "ATMEGA.txt", 1 );
 
         /* 書きまくる */
-        for ( i = 0; i < 5; i++ ) {
+        for ( i = 0; i < 3; i++ ) {
             micomfs_start_fwrite( &fp, i );
 
             for ( j = 0; j < fs.sector_size; j++ ) {
@@ -195,7 +195,8 @@ int main( void )
         micomfs_fcreate( &fs, &fp, "foooo.txt", MICOMFS_MAX_FILE_SECOTR_COUNT );
 
         /* 書きまくる */
-        for( i = 0; /*micomfs_start_fwrite( &fp, i )*/i < 10; i++ ) {
+        for( i = 0; micomfs_start_fwrite( &fp, i ); i++ ) {
+            // micomfs_start_fwrite( &fp, i );
 
             for ( j = 0; j < fs.sector_size; j++ ) {
                 data = 0x3C;
@@ -204,6 +205,10 @@ int main( void )
             }
 
             micomfs_stop_fwrite( &fp, 0 );
+
+            // put
+            sprintf( line_str, "%u", i );
+            st7032i_puts( 0, 0, line_str );
         }
 
         /* ファイル閉じる */
@@ -212,6 +217,7 @@ int main( void )
         st7032i_puts( 1, 0, "Fyuu" );
 
         /* 第一セクター15バイトを全部USARTにぶちまける */
+        /*
         for ( i = 0; i < 10; i++ ) {
             sd_start_step_block_read( i );
 
@@ -224,6 +230,7 @@ int main( void )
 
             sd_stop_step_block_read();
         }
+        */
 
         /*
         sd_block_read( 0, buf, 0, 15 );
