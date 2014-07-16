@@ -22,9 +22,12 @@
 /* 100usごとにカウントされるタイマー */
 static volatile uint32_t system_clock;
 
+static uint8_t input_counter;
+static volatile uint8_t input;
 static FIFO gps_fifo;
 static char gps_buf[100];
 static char line_str[17];
+
 /*
 static char gga_buf[100];
 static char rmc_buf[100];
@@ -51,6 +54,15 @@ ISR( TIMER0_COMPA_vect )
     /* タイマー0コンペアマッチA割り込みベクター */
     /* システムクロックを100usごとに1更新 */
     system_clock++;
+
+    /* 10msごとに入力読み込み */
+    if ( 100 <= input_counter ) {
+        input = PIND;
+
+        input_counter = 0;
+    } else {
+        input_counter++;
+    }
 }
 
 char get_battery_level( void )
@@ -97,6 +109,7 @@ int main( void )
     char use_sd;
     char use_3d;
     char use_press;
+    char
     uint8_t data;
     LPS331APUnit pres;
     AK8975Unit mag;
@@ -142,10 +155,6 @@ int main( void )
     /* 光る */
     PORTB |= _BV( PB0 );
 
-    /* DEBUG */
-    st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame | ST7032IIconBattL1 );
-    st7032i_set_icon( ST7032IIconAddrAntena,  ST7032IIconAntena );
-
     /* Welcome message */
     st7032i_puts( 0, 0, "Sensor recorder" );
     use_sd    ? st7032i_puts( 1, 0,  "SD:O" ) : st7032i_puts( 1, 0,  "SD:X" );
@@ -159,6 +168,26 @@ int main( void )
 
     /* 割り込み開始 */
     sei();
+
+    /* メインループ */
+    while ( 1 ) {
+        /* センサー情報処理 */
+
+        /* 画面状態ごとに分岐 */
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     /* 全センサー測定開始（ 連続なもの ） */
     lps331ap_start( &pres );
