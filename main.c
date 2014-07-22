@@ -11,6 +11,7 @@
 #include "mpu9150.h"
 #include "micomfs.h"
 #include "fifo.h"
+#include "device_id.h"
 
 #include "debug.h"
 
@@ -33,6 +34,10 @@ static char gga_buf[100];
 static char rmc_buf[100];
 */
 static char dbg[128];
+
+typedef enum {
+
+};
 
 ISR( USART_RX_vect )
 {
@@ -109,7 +114,8 @@ int main( void )
     char use_sd;
     char use_3d;
     char use_press;
-    char
+    char display_changed;
+
     uint8_t data;
     LPS331APUnit pres;
     AK8975Unit mag;
