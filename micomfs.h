@@ -121,6 +121,9 @@ char micomfs_fread( MicomFSFile *fp, void *dest, uint16_t count );
 char micomfs_stop_fwrite( MicomFSFile *fp, uint8_t fill );
 char micomfs_stop_fread( MicomFSFile *fp );
 
+char micomfs_seq_fwrite( MicomFSFile *fp, const void *src, uint16_t count );
+char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count );
+
 uint16_t micomfs_get_file_spos( MicomFSFile *fp );
 uint32_t micomfs_get_file_current_sector( MicomFSFile *fp );
 
@@ -130,6 +133,8 @@ char micomfs_write_entry( MicomFSFile *fp );
 /* 以下PCとか大富豪用 削除済みファイルシフトも必要？ */
 /*
 char micomfs_fdelete( MicomFS *fs, const char *name );
+char micomfs_clean( MicomFS *fs );
+char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t count );
 */
 
 #ifdef __cplusplus

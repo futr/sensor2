@@ -6,7 +6,7 @@ DEVICE = atmega328p
 F_CPU  = 8000000UL
 
 # FUSES ( Div8解除 )
-LFUSE  = 0xe2
+LFUSE  = 0xf7
 HFUSE  = 0xd9
 EFUSE  = 0x07
 

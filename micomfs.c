@@ -334,6 +334,11 @@ char micomfs_stop_fwrite( MicomFSFile *fp, uint8_t fill )
     uint8_t data;
     char ret;
 
+    /* 書きモードでなければ失敗 */
+    if ( fp->status != MicomFSFileStatusWrite ) {
+        return 0;
+    }
+
     /* まだ書き残しがあればfillで埋める */
     for ( i = fp->spos; i < fp->fs->dev_sector_size; i++ ) {
         micomfs_dev_write( fp->fs, &data, 1 );
@@ -353,6 +358,11 @@ char micomfs_stop_fread( MicomFSFile *fp )
     uint32_t i;
     uint8_t data;
     char ret;
+
+    /* 読みモードでなければ失敗 */
+    if ( fp->status != MicomFSFileStatusRead ) {
+        return 0;
+    }
 
     /* まだ読み残しがあれば捨てる */
     for ( i = fp->spos; i < fp->fs->dev_sector_size; i++ ) {
@@ -377,4 +387,68 @@ uint32_t micomfs_get_file_current_sector( MicomFSFile *fp )
 {
     /* 現在のアクセス中セクタ取得 */
     return fp->current_sector;
+}
+
+char micomfs_seq_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
+{
+    /* つづけて自動書き込み */
+    uint16_t pos = 0;
+
+    /* 初めてなケラバ失敗 */
+    if ( fp->status != MicomFSFileStatusWrite ) {
+        return 0;
+    }
+
+    while ( 1 ) {
+        /* １セクタ書いていれば次へ */
+        if ( fp->spos >= fp->fs->sector_size ) {
+            /* 書き停止 */
+            micomfs_stop_fwrite( fp, 0 );
+
+            /* 次の書きへ */
+            micomfs_start_fwrite( fp, fp->current_sector + 1 );
+        }
+
+        /* 1バイト書き */
+        micomfs_fwrite( fp, (uint8_t *)src + pos, 1 );
+
+        pos++;
+
+        /* 終了判定 */
+        if ( pos >= count ) {
+            return 1;
+        }
+    }
+}
+
+char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
+{
+    /* つづけて自動読み込み */
+    uint16_t pos = 0;
+
+    /* 初めてなケラバ失敗 */
+    if ( fp->status != MicomFSFileStatusRead ) {
+        return 0;
+    }
+
+    while ( 1 ) {
+        /* １セクタ読んでいれば次へ */
+        if ( fp->spos >= fp->fs->sector_size ) {
+            /* 読み停止 */
+            micomfs_stop_fread( fp );
+
+            /* 次の読みへ */
+            micomfs_start_fread( fp, fp->current_sector + 1 );
+        }
+
+        /* 1バイト読み */
+        micomfs_fread( fp, (uint8_t *)dest + pos, 1 );
+
+        pos++;
+
+        /* 終了判定 */
+        if ( pos >= count ) {
+            return 1;
+        }
+    }
 }
