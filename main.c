@@ -2,6 +2,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <avr/eeprom.h>
 #include <stdlib.h>
 #include "usart.h"
 #include "sd.h"
@@ -47,6 +48,7 @@ typedef enum {
     DispAcc,
     DispMag,
     DispGyro,
+    DispStatus,
     DispFormat,
     DispStartWrite,
     DispStopWrite,
@@ -172,7 +174,9 @@ int main( void )
 {
     Devices enabled_dev;
     Devices write_dev;
+    Devices write_dev_buf;
     Devices updated_dev;
+    Devices sensor_pos;
     Display display;
     char display_changed;
 
@@ -180,8 +184,11 @@ int main( void )
     uint8_t elem_pos;
     NMEASentence sentence;
     uint8_t sentence_pos;
-
     uint8_t data;
+    uint8_t gps_ready;
+    uint8_t sec_timer;
+    uint32_t before_system_clock;
+    uint32_t now_system_clock;
 
     LPS331APUnit pres;
     AK8975Unit mag;
@@ -191,6 +198,7 @@ int main( void )
     int max_level = 0;
     int i;
     int j;
+    int ret;
 
     /* 割り込み停止 */
     cli();
@@ -264,11 +272,17 @@ int main( void )
 
     /* 各種変数初期化 */
     display_changed = 0;
-    write_dev    = 0;
-    sentence     = OtherSentence;
-    sentence_pos = 0;
-    elem_pos     = 0;
-    display      = DispGPS1;
+    write_dev     = 0;
+    write_dev_buf = 0;
+    sentence      = OtherSentence;
+    sentence_pos  = 0;
+    elem_pos      = 0;
+    display       = DispGPS1;
+    gps_ready     = 0;
+    sensor_pos    = 0;
+    before_system_clock = 0;
+    now_system_clock    = 0;
+    system_clock        = 0;
 
     /* ピン入力初期化 */
     input = ~PIND;
@@ -284,6 +298,11 @@ int main( void )
     /* メインループ */
     while ( 1 ) {
         updated_dev = 0;
+
+        /* Get system clock */
+        cli();
+        now_system_clock = system_clock;
+        sei();
 
         /* センサー情報取得 */
         if ( ( enabled_dev & DEV_PRESS ) && lps331ap_data_ready( &pres ) ) {
@@ -312,6 +331,7 @@ int main( void )
             /* 気圧書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
+            micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
             data = ID_LPS331AP;
             micomfs_seq_fwrite( &fp, &data, 1 );
             data = sizeof( pres.pressure );
@@ -323,6 +343,7 @@ int main( void )
             /* 加速度書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
+            micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
             data = ID_MPU9150_ACC;
             micomfs_seq_fwrite( &fp, &data, 1 );
             data = sizeof( mpu9150.acc_x ) * 3;
@@ -336,6 +357,7 @@ int main( void )
             /* ジャイロ書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
+            micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
             data = ID_MPU9150_GYRO;
             micomfs_seq_fwrite( &fp, &data, 1 );
             data = sizeof( mpu9150.gyro_x ) * 3;
@@ -352,6 +374,7 @@ int main( void )
             /* 地磁気書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
+            micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
             data = ID_AK8975;
             micomfs_seq_fwrite( &fp, &data, 1 );
             data = sizeof( mag.adj_x ) * 3;
@@ -365,6 +388,7 @@ int main( void )
             /* 温度書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
+            micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
             data = ID_MPU9150_TEMP;
             micomfs_seq_fwrite( &fp, &data, 1 );
             data = sizeof( mpu9150.temp );
@@ -380,6 +404,7 @@ int main( void )
             if ( write_dev & DEV_GPS ) {
                 data = LOG_SIGNATURE;
                 micomfs_seq_fwrite( &fp, &data, 1 );
+                micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
                 data = ID_GPS;
                 micomfs_seq_fwrite( &fp, &data, 1 );
                 data = GPS_WRITE_UNIT;
@@ -518,6 +543,13 @@ int main( void )
                                     /* 受信クオリティ */
                                     line_str[0][14] = 'Q';
                                     line_str[0][15] = elem_buf[0];
+
+                                    /* Set ready */
+                                    if ( elem_buf[0] != '0' ) {
+                                        gps_ready = 1;
+                                    } else {
+                                        gps_ready = 0;
+                                    }
                                 }
 
                                 break;
@@ -625,9 +657,20 @@ int main( void )
         pushed_input = ~before_input & input;
         before_input = input;
 
-        if ( ( SW_START & pushed_input ) && ( display != DispStartWrite ) ) {
+        if ( ( SW_START & pushed_input ) && ( display < DispFormat ) && !write_dev ) {
             /* スタートが押されたらスタート画面へ */
             display = DispStartWrite;
+
+            /* 画面更新指示 */
+            display_changed = 1;
+        }
+
+        if ( ( SW_STOP & pushed_input ) && ( display < DispFormat ) && write_dev ) {
+            /* If stop is pushed, go to stop */
+            display = DispStopWrite;
+
+            /* 画面更新指示 */
+            display_changed = 1;
         }
 
         if ( ( SW_TOGGLE & pushed_input ) && ( display <= DispFormat ) ) {
@@ -648,6 +691,33 @@ int main( void )
 
             /* 画面更新指示 */
             display_changed = 1;
+        }
+
+        /* Update icon */
+        if ( display_changed ) {
+            if ( write_dev ) {
+                st7032i_set_icon( ST7032IIconAddrDataIn, ST7032IIconDataIn );
+            } else {
+                st7032i_set_icon( ST7032IIconAddrDataIn, 0 );
+            }
+
+            if ( gps_ready ) {
+                st7032i_set_icon( ST7032IIconAddrAntena, ST7032IIconAntena );
+            } else {
+                st7032i_set_icon( ST7032IIconAddrAntena, 0 );
+            }
+        }
+
+        /* Update battery level */
+        if ( now_system_clock > before_system_clock + 10000 ) {
+            display_battery_level();
+
+            before_system_clock = now_system_clock;
+
+            /* 1sec */
+            sec_timer = 1;
+        } else {
+            sec_timer = 0;
         }
 
         /* 画面ごとに分岐 */
@@ -743,17 +813,68 @@ int main( void )
 
             break;
 
-        case DispFormat:
-            /* フォーマット */
-            if ( display_changed ) {
+        case DispStatus:
+            /* Status */
+            if ( display_changed || sec_timer ) {
                 clear_line_buf();
 
-                sprintf( line_str[0], "Format" );
+                sprintf( line_str[0], "CLK:%lu", now_system_clock );
+                sprintf( line_str[1], "FILE:%lu/%lu", fp.current_sector, fp.max_sector_count );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
                 display_changed = 0;
+            }
+
+            break;
+
+        case DispFormat:
+            /* フォーマット */
+            if ( display_changed ) {
+                clear_line_buf();
+
+                /* If writing now, Format is failed */
+                if ( write_dev ) {
+                    sprintf( line_str[0], "Format SDCard" );
+                    sprintf( line_str[1], "FAIL:writing" );
+                } else {
+                    sprintf( line_str[0], "Format SDCard" );
+                    sprintf( line_str[1], "Push START" );
+                }
+
+                st7032i_puts( 0, 0, line_str[0] );
+                st7032i_puts( 1, 0, line_str[1] );
+
+                display_changed = 0;
+            } else {
+                /* Check keys */
+                if ( !write_dev ) {
+                    if ( pushed_input & SW_START ) {
+                        /* Start format */
+                        st7032i_clear();
+                        st7032i_puts( 0, 0, "Formatting now" );
+                        st7032i_puts( 1, 0, "Please wait" );
+
+                        /* format */
+                        ret = micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 64, 0 );
+
+                        /* Put message */
+                        st7032i_clear();
+
+                        if ( ret ) {
+                            st7032i_puts( 1, 0, "Succeeded" );
+                        } else {
+                            st7032i_puts( 1, 0, "Failed" );
+                        }
+
+                        /* Wait */
+                        _delay_ms( 1000 );
+
+                        /* Update display */
+                        display_changed = 1;
+                    }
+                }
             }
 
             break;
@@ -761,29 +882,221 @@ int main( void )
         case DispStartWrite:
             /* 書きこみ開始 */
             if ( display_changed ) {
+                /* Put message */
+
+                /* Init cursor */
+                sensor_pos = DEV_GPS;
+
                 clear_line_buf();
 
-                sprintf( line_str[0], "Start" );
+                sprintf( line_str[0], "Start writing" );
+                sprintf( line_str[1], "Y:START N:STOP" );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
+                /* Read EEPROM */
+                eeprom_busy_wait();
+                write_dev_buf = eeprom_read_byte( 0x00 );
+
                 display_changed = 0;
+            } else {
+                /* Check keys */
+                if ( pushed_input & SW_START ) {
+                    if ( write_dev_buf ) {
+                        /* Create file */
+                        micomfs_fcreate( &fs, &fp, "log", MICOMFS_MAX_FILE_SECOTR_COUNT );
+
+                        /* Start file writing */
+                        micomfs_start_fwrite( &fp, 0 );
+
+                        /* Update write flag */
+                        write_dev = write_dev_buf;
+
+                        /* Put message */
+                        st7032i_clear();
+                        st7032i_puts( 0, 0, "Start Writing" );
+
+                        /* Write EEPROM */
+                        eeprom_busy_wait();
+                        eeprom_write_byte( 0x00, write_dev );
+                    } else {
+                        /* Since nothing is selected, Writing fails */
+                        st7032i_clear();
+                        st7032i_puts( 0, 0, "Writing failed!" );
+                        st7032i_puts( 1, 0, "Please select" );
+                    }
+
+                    /* Wait */
+                    _delay_ms( 1000 );
+
+                    /* return */
+                    display = DispGPS1;
+                    display_changed = 1;
+                } else if ( pushed_input & SW_STOP ) {
+                    /* Stop writing */
+                    display = DispGPS1;
+                    display_changed = 1;
+                } else {
+                    /* Select sensor */
+                    if ( pushed_input & SW_NEXT ) {
+                        sensor_pos = sensor_pos << 1;
+
+                        /* If over, reset cursor */
+                        if ( sensor_pos & DEV_SD ) {
+                            sensor_pos = DEV_PRESS;
+                        }
+                    } else if ( pushed_input & SW_TOGGLE ) {
+                        /* Toggle current sensor will be written */
+                        if ( write_dev_buf & sensor_pos ) {
+                            write_dev_buf &= ~sensor_pos;
+                        } else {
+                            write_dev_buf |= sensor_pos;
+                        }
+                    }
+
+                    /* Display press */
+                    if ( sensor_pos & DEV_PRESS ) {
+                        st7032i_puts( 0, 0, ">" );
+                    } else {
+                        st7032i_puts( 0, 0, " " );
+                    }
+
+                    st7032i_puts( 0, 1, "P:" );
+
+                    if ( write_dev_buf & DEV_PRESS ) {
+                        st7032i_puts( 0, 3, "W " );
+                    } else {
+                        st7032i_puts( 0, 3, "_ " );
+                    }
+
+                    /* Display gyro */
+                    if ( sensor_pos & DEV_GYRO ) {
+                        st7032i_puts( 0, 5, ">" );
+                    } else {
+                        st7032i_puts( 0, 5, " " );
+                    }
+
+                    st7032i_puts( 0, 6, "G:" );
+
+                    if ( write_dev_buf & DEV_GYRO ) {
+                        st7032i_puts( 0, 8, "W " );
+                    } else {
+                        st7032i_puts( 0, 8, "_ " );
+                    }
+
+                    /* Display mag */
+                    if ( sensor_pos & DEV_MAG ) {
+                        st7032i_puts( 0, 10, ">" );
+                    } else {
+                        st7032i_puts( 0, 10, " " );
+                    }
+
+                    st7032i_puts( 0, 11, "M:" );
+
+                    if ( write_dev_buf & DEV_MAG ) {
+                        st7032i_puts( 0, 13, "W " );
+                    } else {
+                        st7032i_puts( 0, 13, "_ " );
+                    }
+
+                    st7032i_puts( 0, 15, " " );
+
+                    /* Display Acc */
+                    if ( sensor_pos & DEV_ACC ) {
+                        st7032i_puts( 1, 0, ">" );
+                    } else {
+                        st7032i_puts( 1, 0, " " );
+                    }
+
+                    st7032i_puts( 1, 1, "A:" );
+
+                    if ( write_dev_buf & DEV_ACC ) {
+                        st7032i_puts( 1, 3, "W " );
+                    } else {
+                        st7032i_puts( 1, 3, "_ " );
+                    }
+
+                    /* Display Temp */
+                    if ( sensor_pos & DEV_TEMP ) {
+                        st7032i_puts( 1, 5, ">" );
+                    } else {
+                        st7032i_puts( 1, 5, " " );
+                    }
+
+                    st7032i_puts( 1, 6, "T:" );
+
+                    if ( write_dev_buf & DEV_TEMP) {
+                        st7032i_puts( 1, 8, "W " );
+                    } else {
+                        st7032i_puts( 1, 8, "_ " );
+                    }
+
+                    /* Display GPS */
+                    if ( sensor_pos & DEV_GPS ) {
+                        st7032i_puts( 1, 10, ">" );
+                    } else {
+                        st7032i_puts( 1, 10, " " );
+                    }
+
+                    st7032i_puts( 1, 11, "S:" );
+
+                    if ( write_dev_buf & DEV_GPS ) {
+                        st7032i_puts( 1, 13, "W " );
+                    } else {
+                        st7032i_puts( 1, 13, "_ " );
+                    }
+
+                    st7032i_puts( 1, 15, " " );
+                }
             }
 
             break;
 
         case DispStopWrite:
-            /* 書きこみ開始 */
+            /* Stop writing */
             if ( display_changed ) {
                 clear_line_buf();
 
-                sprintf( line_str[0], "Stop" );
+                sprintf( line_str[0], "Stop writing" );
+                sprintf( line_str[1], "Y:START N:STOP" );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
                 display_changed = 0;
+            } else {
+                /* Check buttons */
+                if ( pushed_input & SW_START ) {
+                    /* Stop writing */
+                    st7032i_clear();
+                    st7032i_puts( 0, 0, "Stopping now" );
+                    st7032i_puts( 1, 0, "Please wait" );
+
+                    /* Stop file writing */
+                    ret  = micomfs_stop_fwrite( &fp, 0 );
+                    ret += micomfs_fclose( &fp );
+
+                    /* Put message */
+                    st7032i_clear();
+
+                    if ( ret ) {
+                        st7032i_puts( 1, 0, "Succeeded" );
+                    } else {
+                        st7032i_puts( 1, 0, "Failed" );
+                    }
+
+                    /* Wait */
+                    _delay_ms( 1000 );
+
+                    /* Update display */
+                    display = DispGPS1;
+                    display_changed = 1;
+                } else if ( pushed_input & SW_STOP ) {
+                    /* Update display */
+                    display = DispGPS1;
+                    display_changed = 1;
+                }
             }
 
             break;
@@ -807,9 +1120,18 @@ int main( void )
     DispAcc,
     DispMag,
     DispGyro,
+    DispStatus,
     DispFormat,
     DispStartWrite,
     DispStopWrite,
+
+    DEV_PRESS = 0x01,
+    DEV_GYRO  = 0x02,
+    DEV_MAG   = 0x04,
+    DEV_ACC   = 0x08,
+    DEV_TEMP  = 0x10,
+    DEV_GPS   = 0x20,
+    DEV_SD    = 0x40,
 
 */
 
