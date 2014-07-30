@@ -19,10 +19,10 @@
 #define LOG_SIGNATURE 0x3E      /* ログファイルのデーターごとの先頭バイトシグネチャ */
 #define GPS_WRITE_UNIT 32       /* GPSデーターの書き込み単位 */
 
-#define SW_STOP   _BV( PB4 )
-#define SW_START  _BV( PB5 )
-#define SW_TOGGLE _BV( PB6 )
-#define SW_NEXT   _BV( PB7 )
+#define SW_STOP   _BV( PB7 )
+#define SW_START  _BV( PB6 )
+#define SW_TOGGLE _BV( PB4 )
+#define SW_NEXT   _BV( PB5 )
 
 /* 100usごとにカウントされるタイマー */
 static volatile uint32_t system_clock;
@@ -31,8 +31,9 @@ static volatile uint8_t input;
 static volatile uint8_t before_input;
 static volatile uint8_t pushed_input;
 static FIFO gps_fifo;
-static char gps_buf[100];
+static char gps_buf[70];
 static char line_str[2][17];
+static char dbg[10];
 
 typedef enum {
     OtherSentence,
@@ -271,7 +272,7 @@ int main( void )
     usart_init( 4800, UsartRX | UsartTX, UsartIntRX );
 
     /* 各種変数初期化 */
-    display_changed = 0;
+    display_changed = 1;
     write_dev     = 0;
     write_dev_buf = 0;
     sentence      = OtherSentence;
@@ -315,6 +316,12 @@ int main( void )
         if ( ( enabled_dev & DEV_MAG ) && ak8975_data_ready( &mag ) ) {
             /* 地磁気 */
             ak8975_read( &mag );
+
+            /* 地磁気補正 */
+            ak8975_calc_adjusted_h( &mag );
+
+            /* 測定開始 */
+            ak8975_start( &mag );
 
             updated_dev |= DEV_MAG;
         }
@@ -368,9 +375,6 @@ int main( void )
         }
 
         if ( ( write_dev & DEV_MAG ) && ( updated_dev & DEV_MAG ) ) {
-            /* 地磁気補正 */
-            ak8975_calc_adjusted_h( &mag );
-
             /* 地磁気書き込み */
             data = LOG_SIGNATURE;
             micomfs_seq_fwrite( &fp, &data, 1 );
@@ -396,8 +400,21 @@ int main( void )
             micomfs_seq_fwrite( &fp, &mpu9150.temp, sizeof( mpu9150.temp ) );
         }
 
-        /* GPSデーターが書きこみ単位以上たまってれば処理 */
-        if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) >= GPS_WRITE_UNIT ) ) {
+        /* DEBUG */
+        /*
+        if ( fifo_level( &gps_fifo ) > max_level ) {
+            max_level = fifo_level( &gps_fifo );
+        }
+
+        sprintf( dbg, "%d\n", max_level );
+        for ( i = 0; i < strlen( dbg ); i++ ) {
+            while ( !usart_can_write() );
+            usart_write( dbg[i] );
+        }
+        */
+
+        /* GPSデーターが書きこみ単位以上たまってれば処理 ( なぜか >= だとミスる　FIFOにバグあり？ ) */
+        if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) > GPS_WRITE_UNIT ) ) {
             /* 書きこみ単位分処理 */
 
             /* 必要ならヘッダ書き込み */
@@ -429,23 +446,39 @@ int main( void )
 
                     /* なぜかうまってしまった場合処理状態クリア */
                     if ( elem_pos >= sizeof( elem_buf ) - 1 ) {
-                        elem_pos = 0;
-                        sentence = OtherSentence;
+                        elem_pos     = 0;
+                        sentence     = OtherSentence;
+                        sentence_pos = 0;
 
                         continue;
                     }
 
                     /* カンマか改行を見つけたらエレメント処理 */
                     if ( data == ',' || data == 0x0A ) {
+                        /* DEBUG */
+                        /*
+                        for ( j = 0; j < elem_pos; j++ ) {
+                            while ( !usart_can_write() );
+                            usart_write( elem_buf[j] );
+                        }
+                        while ( !usart_can_write() );
+                        usart_write( 0x0A );
+                        */
+                        /*
+                        sprintf( dbg, "%d\n", (int)fifo_level( &gps_fifo ) );
+                        for ( j = 0; j < strlen( dbg ); j++ ) {
+                            while ( !usart_can_write() );
+                            usart_write( dbg[j] );
+                        }
+                        */
+
+
                         /* 現在処理中のセンテンスで分岐 */
                         switch ( sentence ) {
                         case GPGGA:
                             switch ( sentence_pos ) {
                             case 0:
                                 if ( display == DispGPS1 ) {
-                                    /* GGAの先頭で画面バッファクリア */
-                                    clear_line_buf();
-
                                     /* 時刻をバッファに印字 */
                                     line_str[0][0] = elem_buf[0];
                                     line_str[0][1] = elem_buf[1];
@@ -456,6 +489,7 @@ int main( void )
                                     line_str[0][6] = elem_buf[4];
                                     line_str[0][7] = elem_buf[5];
                                     line_str[0][8] = 'S';
+                                    line_str[0][9] = ' ';
                                 }
 
                                 break;
@@ -463,6 +497,10 @@ int main( void )
                             case 1:
                                 if ( display == DispGPS2 ) {
                                     /* 緯度 */
+                                    for ( j = 0; j < 16; j++ ) {
+                                        line_str[1][j] = ' ';
+                                    }
+
                                     line_str[1][0] = 'L';
                                     line_str[1][1] = 'A';
                                     line_str[1][2] = 'T';
@@ -502,6 +540,10 @@ int main( void )
                             case 3:
                                 if ( display == DispGPS2 ) {
                                     /* 経度 */
+                                    for ( j = 0; j < 16; j++ ) {
+                                        line_str[0][j] = ' ';
+                                    }
+
                                     line_str[0][0] = 'L';
                                     line_str[0][1] = 'O';
                                     line_str[0][2] = 'N';
@@ -543,13 +585,13 @@ int main( void )
                                     /* 受信クオリティ */
                                     line_str[0][14] = 'Q';
                                     line_str[0][15] = elem_buf[0];
+                                }
 
-                                    /* Set ready */
-                                    if ( elem_buf[0] != '0' ) {
-                                        gps_ready = 1;
-                                    } else {
-                                        gps_ready = 0;
-                                    }
+                                /* Set ready */
+                                if ( elem_buf[0] != '0' ) {
+                                    gps_ready = 1;
+                                } else {
+                                    gps_ready = 0;
                                 }
 
                                 break;
@@ -562,6 +604,8 @@ int main( void )
                                     for ( j = 0; elem_buf[j] != ','; j++ ) {
                                         line_str[0][11 + j] = elem_buf[j];
                                     }
+
+                                    line_str[0][11 + j] = ' ';
                                 }
 
                                 break;
@@ -572,13 +616,15 @@ int main( void )
                             case 8:
                                 if ( display == DispGPS1 ) {
                                     /* 高さ */
-                                    line_str[1][0] = 'H';
-
-                                    for ( j = 0; elem_buf[j] != ','; j++ ) {
-                                        line_str[1][1 + j] = elem_buf[j];
+                                    for ( j = 0; j < 8; j++ ) {
+                                        line_str[1][j] = ' ';
                                     }
 
-                                    line_str[1][1 + j] = 'M';
+                                    for ( j = 0; elem_buf[j] != ','; j++ ) {
+                                        line_str[1][j] = elem_buf[j];
+                                    }
+
+                                    line_str[1][j] = 'M';
                                 }
 
                                 /* あとは使わないので次のセンテンスへ */
@@ -597,16 +643,19 @@ int main( void )
 
                         case GPRMC:
                             switch ( sentence_pos ) {
-                            case 4:
+                            case 6:
                                 if ( display == DispGPS1 ) {
                                     /* 速度しか使わない */
+                                    for ( j = 0; j < 8; j++ ) {
+                                        line_str[1][8 + j] = ' ';
+                                    }
+
                                     for ( j = 0; elem_buf[j] != ','; j++ ) {
                                         line_str[1][8 + j] = elem_buf[j];
                                     }
 
                                     line_str[1][8 + j + 0] = 'K';
-                                    line_str[1][8 + j + 1] = 'N';
-                                    line_str[1][8 + j + 2] = 'T';
+                                    line_str[1][8 + j + 1] = 'T';
                                 }
 
                                 /* あとは使わないので次のセンテンスへ */
@@ -686,26 +735,8 @@ int main( void )
                 display = DispNone;
             }
 
-            /* クリア */
-            st7032i_clear();
-
             /* 画面更新指示 */
             display_changed = 1;
-        }
-
-        /* Update icon */
-        if ( display_changed ) {
-            if ( write_dev ) {
-                st7032i_set_icon( ST7032IIconAddrDataIn, ST7032IIconDataIn );
-            } else {
-                st7032i_set_icon( ST7032IIconAddrDataIn, 0 );
-            }
-
-            if ( gps_ready ) {
-                st7032i_set_icon( ST7032IIconAddrAntena, ST7032IIconAntena );
-            } else {
-                st7032i_set_icon( ST7032IIconAddrAntena, 0 );
-            }
         }
 
         /* Update battery level */
@@ -718,6 +749,21 @@ int main( void )
             sec_timer = 1;
         } else {
             sec_timer = 0;
+        }
+
+        /* アイコン表示更新 */
+        if ( display_changed || sec_timer ) {
+            if ( write_dev ) {
+                st7032i_set_icon( ST7032IIconAddrDataIn, ST7032IIconDataIn );
+            } else {
+                st7032i_set_icon( ST7032IIconAddrDataIn, 0 );
+            }
+
+            if ( gps_ready ) {
+                st7032i_set_icon( ST7032IIconAddrAntena, ST7032IIconAntena );
+            } else {
+                st7032i_set_icon( ST7032IIconAddrAntena, 0 );
+            }
         }
 
         /* 画面ごとに分岐 */
@@ -737,8 +783,15 @@ int main( void )
         case DispGPS2:
             /* GPS用1,2 */
             if ( display_changed ) {
-                st7032i_puts( 0, 0, "Wait" );
+                /* 画面更新開始 */
                 clear_line_buf();
+                st7032i_clear();
+                st7032i_puts( 0, 0, "Wait" );
+
+                /* GPS解析状態マシン初期化 */
+                sentence     = OtherSentence;
+                sentence_pos = 0;
+                elem_pos     = 0;
 
                 display_changed = 0;
             }
@@ -753,12 +806,10 @@ int main( void )
         case DispPressTemp:
             /* 気圧温度用 */
             if ( display_changed || ( updated_dev & DEV_TEMP & DEV_PRESS ) ) {
-                clear_line_buf();
+                st7032i_clear();
 
                 sprintf( line_str[0], "PRES %dhPa", (int)( pres.pressure / 4096 ) );
-                i = sprintf( line_str[1], "TEMP %d", (int)mpu9150_get_temp_in_c( &mpu9150 ) );
-                line_str[1][i + 0] = 0xDF;
-                line_str[1][i + 1] = 'C';
+                i = sprintf( line_str[1], "TEMP %d%cC", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -786,11 +837,13 @@ int main( void )
         case DispMag:
             /* 地磁気 */
             if ( display_changed || ( updated_dev & DEV_MAG ) ) {
-                clear_line_buf();
+                st7032i_clear();
 
-                sprintf( line_str[0], "Mag" );
-
-                st7032i_puts( 0, 0, line_str[0] );
+                st7032i_puts( 0, 0, "Magnetic[uT]" );
+                sprintf( line_str[1], "X%d Y%d Z%d",
+                        (int)( mag.adj_x * 0.3 ),
+                        (int)( mag.adj_y * 0.3 ),
+                        (int)( mag.adj_z * 0.3 ) );
                 st7032i_puts( 1, 0, line_str[1] );
 
                 display_changed = 0;
@@ -816,10 +869,10 @@ int main( void )
         case DispStatus:
             /* Status */
             if ( display_changed || sec_timer ) {
-                clear_line_buf();
+                st7032i_clear();
 
                 sprintf( line_str[0], "CLK:%lu", now_system_clock );
-                sprintf( line_str[1], "FILE:%lu/%lu", fp.current_sector, fp.max_sector_count );
+                sprintf( line_str[1], "FILE:%d%%", (int)( (float)fp.current_sector / fp.max_sector_count * 100 ) );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -832,19 +885,16 @@ int main( void )
         case DispFormat:
             /* フォーマット */
             if ( display_changed ) {
-                clear_line_buf();
+                st7032i_clear();
 
                 /* If writing now, Format is failed */
                 if ( write_dev ) {
-                    sprintf( line_str[0], "Format SDCard" );
-                    sprintf( line_str[1], "FAIL:writing" );
+                    st7032i_puts( 0, 0, "Format SDCard" );
+                    st7032i_puts( 1, 0, "FAIL:writing" );
                 } else {
-                    sprintf( line_str[0], "Format SDCard" );
-                    sprintf( line_str[1], "Push START" );
+                    st7032i_puts( 0, 0, "Format SDCard" );
+                    st7032i_puts( 1, 0, "Push START" );
                 }
-
-                st7032i_puts( 0, 0, line_str[0] );
-                st7032i_puts( 1, 0, line_str[1] );
 
                 display_changed = 0;
             } else {
@@ -873,6 +923,13 @@ int main( void )
 
                         /* Update display */
                         display_changed = 1;
+
+                        /* GPSバッファをクリア */
+                        cli();
+                        while ( fifo_can_read( &gps_fifo ) ) {
+                            fifo_read( &gps_fifo, &data );
+                        }
+                        sei();
                     }
                 }
             }
@@ -884,16 +941,12 @@ int main( void )
             if ( display_changed ) {
                 /* Put message */
 
-                /* Init cursor */
-                sensor_pos = DEV_GPS;
+                /* カーソル初期化 */
+                sensor_pos = DEV_PRESS;
 
-                clear_line_buf();
-
-                sprintf( line_str[0], "Start writing" );
-                sprintf( line_str[1], "Y:START N:STOP" );
-
-                st7032i_puts( 0, 0, line_str[0] );
-                st7032i_puts( 1, 0, line_str[1] );
+                st7032i_clear();
+                st7032i_puts( 0, 0, "Start writing" );
+                st7032i_puts( 1, 0, "Y:START N:STOP" );
 
                 /* Read EEPROM */
                 eeprom_busy_wait();
@@ -933,10 +986,24 @@ int main( void )
                     /* return */
                     display = DispGPS1;
                     display_changed = 1;
+
+                    /* GPSバッファをクリア */
+                    cli();
+                    while ( fifo_can_read( &gps_fifo ) ) {
+                        fifo_read( &gps_fifo, &data );
+                    }
+                    sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Stop writing */
                     display = DispGPS1;
                     display_changed = 1;
+
+                    /* GPSバッファをクリア */
+                    cli();
+                    while ( fifo_can_read( &gps_fifo ) ) {
+                        fifo_read( &gps_fifo, &data );
+                    }
+                    sei();
                 } else {
                     /* Select sensor */
                     if ( pushed_input & SW_NEXT ) {
@@ -1056,13 +1123,9 @@ int main( void )
         case DispStopWrite:
             /* Stop writing */
             if ( display_changed ) {
-                clear_line_buf();
-
-                sprintf( line_str[0], "Stop writing" );
-                sprintf( line_str[1], "Y:START N:STOP" );
-
-                st7032i_puts( 0, 0, line_str[0] );
-                st7032i_puts( 1, 0, line_str[1] );
+                st7032i_clear();
+                st7032i_puts( 0, 0, "Stop writing" );
+                st7032i_puts( 1, 0, "Y:START N:STOP" );
 
                 display_changed = 0;
             } else {
@@ -1076,6 +1139,9 @@ int main( void )
                     /* Stop file writing */
                     ret  = micomfs_stop_fwrite( &fp, 0 );
                     ret += micomfs_fclose( &fp );
+
+                    /* 書き込み指示クリア */
+                    write_dev = 0;
 
                     /* Put message */
                     st7032i_clear();
@@ -1092,10 +1158,24 @@ int main( void )
                     /* Update display */
                     display = DispGPS1;
                     display_changed = 1;
+
+                    /* GPSバッファをクリア */
+                    cli();
+                    while ( fifo_can_read( &gps_fifo ) ) {
+                        fifo_read( &gps_fifo, &data );
+                    }
+                    sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Update display */
                     display = DispGPS1;
                     display_changed = 1;
+
+                    /* GPSバッファをクリア */
+                    cli();
+                    while ( fifo_can_read( &gps_fifo ) ) {
+                        fifo_read( &gps_fifo, &data );
+                    }
+                    sei();
                 }
             }
 
