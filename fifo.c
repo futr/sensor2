@@ -7,7 +7,7 @@ void fifo_init( FIFO *fifo, void *data, size_t data_size, size_t pad, size_t len
     fifo->data_size = data_size;
     fifo->length    = length;
     fifo->pad       = pad;
-    fifo->end       = data + ( length - 1 ) * ( pad + data_size );
+    fifo->end       = (char *)data + ( length - 1 ) * ( pad + data_size );
     fifo->level     = 0;
 
     /* ポインター初期化 */
@@ -44,7 +44,7 @@ char fifo_read( FIFO *fifo, void *dest )
 char fifo_write( FIFO *fifo, void *source )
 {
     /* 書き込み */
-    volatile unsigned char *next_w;
+    unsigned char *next_w;
 
     /* 次の座標を計算しておく */
     if ( fifo->w < fifo->end ) {

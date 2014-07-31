@@ -33,7 +33,7 @@ static volatile uint8_t pushed_input;
 static FIFO gps_fifo;
 static char gps_buf[70];
 static char line_str[2][17];
-static char dbg[10];
+static char dbg[20];
 
 typedef enum {
     OtherSentence,
@@ -414,7 +414,7 @@ int main( void )
         */
 
         /* GPSデーターが書きこみ単位以上たまってれば処理 ( なぜか >= だとミスる　FIFOにバグあり？ ) */
-        if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) > GPS_WRITE_UNIT ) ) {
+        if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) >= GPS_WRITE_UNIT ) ) {
             /* 書きこみ単位分処理 */
 
             /* 必要ならヘッダ書き込み */
@@ -431,8 +431,24 @@ int main( void )
             for ( i = 0; i < GPS_WRITE_UNIT; i++ ) {
                 /* 1バイトよみ */
                 cli();
-                fifo_read( &gps_fifo, &data );
+                ret = fifo_read( &gps_fifo, &data );
                 sei();
+
+                /* DEBUG */
+                if ( !ret ) {
+                    PINB |= _BV( PB0 );
+
+                    /* DEBUG */
+                    sprintf( dbg, "%d %p %p\n", (int)fifo_level( &gps_fifo ), gps_fifo.r, gps_fifo.w );
+                    for ( j = 0; j < strlen( dbg ); j++ ) {
+                        while ( !usart_can_write() );
+                        usart_write( dbg[j] );
+                    }
+                }
+                /*
+                while ( !usart_can_write() );
+                usart_write( data );
+                */
 
                 /* 必要なら書き */
                 if ( write_dev & DEV_GPS ) {
@@ -701,7 +717,6 @@ int main( void )
         }
 
         /* スイッチ処理 */
-
         /* 押されたスイッチを調べる */
         pushed_input = ~before_input & input;
         before_input = input;
@@ -739,8 +754,9 @@ int main( void )
             display_changed = 1;
         }
 
-        /* Update battery level */
+        /* １秒ごとに更新 */
         if ( now_system_clock > before_system_clock + 10000 ) {
+            /* バッテリレベル更新 */
             display_battery_level();
 
             before_system_clock = now_system_clock;
