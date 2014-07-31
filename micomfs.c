@@ -406,7 +406,9 @@ char micomfs_seq_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
             micomfs_stop_fwrite( fp, 0 );
 
             /* 次の書きへ */
-            micomfs_start_fwrite( fp, fp->current_sector + 1 );
+            if ( !micomfs_start_fwrite( fp, fp->current_sector + 1 ) ) {
+                return 0;
+            }
         }
 
         /* 1バイト書き */
@@ -438,7 +440,9 @@ char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
             micomfs_stop_fread( fp );
 
             /* 次の読みへ */
-            micomfs_start_fread( fp, fp->current_sector + 1 );
+            if ( !micomfs_start_fread( fp, fp->current_sector + 1 ) ) {
+                return 0;
+            }
         }
 
         /* 1バイト読み */

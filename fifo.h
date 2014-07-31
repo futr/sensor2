@@ -1,5 +1,6 @@
 /*
  * 簡易汎用FIFO
+ * 満か空かは単純にlevelで判断します
  *
  */
 
@@ -10,10 +11,10 @@
 #include <string.h>
 
 typedef struct FIFO_tag {
-    volatile unsigned char *data;       /* データー領域へのポインター */
-    volatile unsigned char *r;          /* 次に読むアドレス */
-    volatile unsigned char *w;          /* 次に書くアドレス */
-    volatile unsigned char *end;        /* FIFOの終了地点 */
+    unsigned char *data;       /* データー領域へのポインター */
+    unsigned char *r;          /* 次に読むアドレス */
+    unsigned char *w;          /* 次に書くアドレス */
+    unsigned char *end;        /* FIFOの終了地点 */
 
     size_t length;      /* データ個数 */
     size_t data_size;   /* データ一個のバイト数 */
@@ -28,6 +29,7 @@ extern "C" {
 
 /* 初期化・フラッシュ */
 void fifo_init( FIFO *fifo, void *data, size_t data_size, size_t pad, size_t length );
+void fifo_clear( FIFO *fifo );
 
 /* 読み書き */
 char fifo_read( FIFO *fifo, void *dest );

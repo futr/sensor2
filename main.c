@@ -1,3 +1,15 @@
+/*
+ * すること
+ * ファイルシステムのチェック
+ * たとえば、許容３にしてちゃんとエラーになるか、ダンプをみるとちゃんと構成されているか。
+ * ファイルを書きながら終了した場合、全セクターリザーブされているので、エラーにならないとおかしい。
+ *
+ * センサーの更新感覚をもう少し遅く。
+ *
+ * 書き込みエラーが出た場合正常に終了する必要があるけど今は対策がないので作る
+ *
+ */
+
 #include "ide.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -14,8 +26,6 @@
 #include "fifo.h"
 #include "device_id.h"
 
-#include "debug.h"
-
 #define LOG_SIGNATURE 0x3E      /* ログファイルのデーターごとの先頭バイトシグネチャ */
 #define GPS_WRITE_UNIT 32       /* GPSデーターの書き込み単位 */
 
@@ -24,16 +34,12 @@
 #define SW_TOGGLE _BV( PB4 )
 #define SW_NEXT   _BV( PB5 )
 
-/* 100usごとにカウントされるタイマー */
-static volatile uint32_t system_clock;
+static volatile uint32_t system_clock;  /* 100usごとにカウントされるタイマー */
 static uint8_t input_counter;
 static volatile uint8_t input;
-static volatile uint8_t before_input;
-static volatile uint8_t pushed_input;
 static FIFO gps_fifo;
-static char gps_buf[70];
+static char gps_buf[80];
 static char line_str[2][17];
-static char dbg[20];
 
 typedef enum {
     OtherSentence,
@@ -86,8 +92,8 @@ ISR( TIMER0_COMPA_vect )
     /* システムクロックを100usごとに1更新 */
     system_clock++;
 
-    /* 10msごとに入力読み込み */
-    if ( 100 <= input_counter ) {
+    /* 20msごとに入力読み込み */
+    if ( 200 <= input_counter ) {
         input = ~PIND;
 
         input_counter = 0;
@@ -178,25 +184,36 @@ int main( void )
     Devices write_dev_buf;
     Devices updated_dev;
     Devices sensor_pos;
+
     Display display;
     char display_changed;
+
+    char file_name[16];
 
     char elem_buf[16];
     uint8_t elem_pos;
     NMEASentence sentence;
     uint8_t sentence_pos;
-    uint8_t data;
     uint8_t gps_ready;
+
+    uint8_t sec_timer01;
+    uint8_t sec_timer02;
     uint8_t sec_timer;
     uint32_t before_system_clock;
     uint32_t now_system_clock;
 
+    uint8_t before_input;
+    uint8_t pushed_input;
+
     LPS331APUnit pres;
     AK8975Unit mag;
     MPU9150Unit mpu9150;
+
     MicomFS fs;
     MicomFSFile fp;
-    int max_level = 0;
+
+    int max_fifo_level = 0;
+    uint8_t data;
     int i;
     int j;
     int ret;
@@ -284,6 +301,13 @@ int main( void )
     before_system_clock = 0;
     now_system_clock    = 0;
     system_clock        = 0;
+    sec_timer   = 0;
+    sec_timer01 = 0;
+    sec_timer02 = 0;
+    max_fifo_level = 0;
+
+    /* Init file name */
+    strcpy( file_name, "log" );
 
     /* ピン入力初期化 */
     input = ~PIND;
@@ -400,18 +424,10 @@ int main( void )
             micomfs_seq_fwrite( &fp, &mpu9150.temp, sizeof( mpu9150.temp ) );
         }
 
-        /* DEBUG */
-        /*
-        if ( fifo_level( &gps_fifo ) > max_level ) {
-            max_level = fifo_level( &gps_fifo );
+        /* 最大FIFO使用量記録 ほぼDEBUG用 */
+        if ( ( fifo_level( &gps_fifo ) > max_fifo_level ) && display <= DispFormat ) {
+            max_fifo_level = fifo_level( &gps_fifo );
         }
-
-        sprintf( dbg, "%d\n", max_level );
-        for ( i = 0; i < strlen( dbg ); i++ ) {
-            while ( !usart_can_write() );
-            usart_write( dbg[i] );
-        }
-        */
 
         /* GPSデーターが書きこみ単位以上たまってれば処理 ( なぜか >= だとミスる　FIFOにバグあり？ ) */
         if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) >= GPS_WRITE_UNIT ) ) {
@@ -428,27 +444,12 @@ int main( void )
                 micomfs_seq_fwrite( &fp, &data, 1 );
             }
 
+            /* 全バイト処理 */
             for ( i = 0; i < GPS_WRITE_UNIT; i++ ) {
                 /* 1バイトよみ */
                 cli();
                 ret = fifo_read( &gps_fifo, &data );
                 sei();
-
-                /* DEBUG */
-                if ( !ret ) {
-                    PINB |= _BV( PB0 );
-
-                    /* DEBUG */
-                    sprintf( dbg, "%d %p %p\n", (int)fifo_level( &gps_fifo ), gps_fifo.r, gps_fifo.w );
-                    for ( j = 0; j < strlen( dbg ); j++ ) {
-                        while ( !usart_can_write() );
-                        usart_write( dbg[j] );
-                    }
-                }
-                /*
-                while ( !usart_can_write() );
-                usart_write( data );
-                */
 
                 /* 必要なら書き */
                 if ( write_dev & DEV_GPS ) {
@@ -471,24 +472,6 @@ int main( void )
 
                     /* カンマか改行を見つけたらエレメント処理 */
                     if ( data == ',' || data == 0x0A ) {
-                        /* DEBUG */
-                        /*
-                        for ( j = 0; j < elem_pos; j++ ) {
-                            while ( !usart_can_write() );
-                            usart_write( elem_buf[j] );
-                        }
-                        while ( !usart_can_write() );
-                        usart_write( 0x0A );
-                        */
-                        /*
-                        sprintf( dbg, "%d\n", (int)fifo_level( &gps_fifo ) );
-                        for ( j = 0; j < strlen( dbg ); j++ ) {
-                            while ( !usart_can_write() );
-                            usart_write( dbg[j] );
-                        }
-                        */
-
-
                         /* 現在処理中のセンテンスで分岐 */
                         switch ( sentence ) {
                         case GPGGA:
@@ -506,6 +489,10 @@ int main( void )
                                     line_str[0][7] = elem_buf[5];
                                     line_str[0][8] = 'S';
                                     line_str[0][9] = ' ';
+
+                                    /* ついでにファイル名にもコピー */
+                                    memcpy( file_name, elem_buf, 6 );
+                                    file_name[6] = '¥0';
                                 }
 
                                 break;
@@ -519,7 +506,7 @@ int main( void )
 
                                     line_str[1][0] = 'L';
                                     line_str[1][1] = 'A';
-                                    line_str[1][2] = 'T';
+                                    line_str[1][2] = ' ';
 
                                     /* カラならなにもしない */
                                     if ( elem_buf[0] == ',' ) {
@@ -562,7 +549,7 @@ int main( void )
 
                                     line_str[0][0] = 'L';
                                     line_str[0][1] = 'O';
-                                    line_str[0][2] = 'N';
+                                    line_str[0][2] = ' ';
 
                                     /* カラならなにもしない */
                                     if ( elem_buf[0] == ',' ) {
@@ -729,7 +716,7 @@ int main( void )
             display_changed = 1;
         }
 
-        if ( ( SW_STOP & pushed_input ) && ( display < DispFormat ) && write_dev ) {
+        if ( ( SW_STOP & pushed_input ) && ( display <= DispFormat ) && write_dev ) {
             /* If stop is pushed, go to stop */
             display = DispStopWrite;
 
@@ -752,23 +739,44 @@ int main( void )
 
             /* 画面更新指示 */
             display_changed = 1;
+
+            /* Clear display */
+            st7032i_clear();
         }
 
-        /* １秒ごとに更新 */
-        if ( now_system_clock > before_system_clock + 10000 ) {
+        /* 0.1秒ごとに更新 */
+        if ( now_system_clock > before_system_clock + 1000 ) {
             /* バッテリレベル更新 */
             display_battery_level();
 
             before_system_clock = now_system_clock;
 
-            /* 1sec */
-            sec_timer = 1;
+            /* 0.1sec */
+            sec_timer01 = 1;
         } else {
-            sec_timer = 0;
+            sec_timer01 = 0;
+        }
+
+        /* 1sec timer */
+        if ( sec_timer01 ) {
+            if ( sec_timer < 10 ) {
+                sec_timer++;
+            } else {
+                sec_timer = 0;
+            }
+        }
+
+        /* 0.3sec timer */
+        if ( sec_timer01 ) {
+            if ( sec_timer02 < 2 ) {
+                sec_timer02++;
+            } else {
+                sec_timer02 = 0;
+            }
         }
 
         /* アイコン表示更新 */
-        if ( display_changed || sec_timer ) {
+        if ( display_changed || ( sec_timer == 0 ) ) {
             if ( write_dev ) {
                 st7032i_set_icon( ST7032IIconAddrDataIn, ST7032IIconDataIn );
             } else {
@@ -821,11 +829,11 @@ int main( void )
 
         case DispPressTemp:
             /* 気圧温度用 */
-            if ( display_changed || ( updated_dev & DEV_TEMP & DEV_PRESS ) ) {
+            if ( display_changed || ( ( updated_dev & DEV_TEMP & DEV_PRESS ) && ( sec_timer02 == 0 ) ) ) {
                 st7032i_clear();
 
-                sprintf( line_str[0], "PRES %dhPa", (int)( pres.pressure / 4096 ) );
-                i = sprintf( line_str[1], "TEMP %d%cC", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
+                snprintf( line_str[0], 17, "Pres %d[hPa]", (int)( pres.pressure / 4096 ) );
+                i = snprintf( line_str[1], 17, "Temp %d[%cC]", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -837,11 +845,11 @@ int main( void )
 
         case DispAcc:
             /* 加速度 */
-            if ( display_changed || ( updated_dev & DEV_ACC ) ) {
-                clear_line_buf();
-
-                sprintf( line_str[0], "Acc" );
-
+            if ( display_changed || ( ( updated_dev & DEV_ACC ) && ( sec_timer02 == 0 ) ) ) {
+                snprintf( line_str[0], 17, "Acc[mG] X%+06d", (int)( mpu9150.acc_x * 0.122 ) );
+                snprintf( line_str[1], 17, "Y%+06d Z%+06d",
+                        (int)( mpu9150.acc_y * 0.122 ),
+                        (int)( mpu9150.acc_z * 0.122 ) );
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
@@ -852,14 +860,12 @@ int main( void )
 
         case DispMag:
             /* 地磁気 */
-            if ( display_changed || ( updated_dev & DEV_MAG ) ) {
-                st7032i_clear();
-
-                st7032i_puts( 0, 0, "Magnetic[uT]" );
-                sprintf( line_str[1], "X%d Y%d Z%d",
-                        (int)( mag.adj_x * 0.3 ),
+            if ( display_changed || ( ( updated_dev & DEV_MAG ) && ( sec_timer02 == 0 ) ) ) {
+                snprintf( line_str[0], 17, "Mag[uT] X%+06d", (int)( mag.adj_x * 0.3 ) );
+                snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mag.adj_y * 0.3 ),
                         (int)( mag.adj_z * 0.3 ) );
+                st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
                 display_changed = 0;
@@ -870,10 +876,10 @@ int main( void )
         case DispGyro:
             /* ジャイロ */
             if ( display_changed || ( updated_dev & DEV_GYRO ) ) {
-                clear_line_buf();
-
-                sprintf( line_str[0], "Gyro" );
-
+                snprintf( line_str[0], 17, "Gy[dps] X%+06d", (int)( mpu9150.gyro_x * 0.01526 ) );
+                snprintf( line_str[1], 17, "Y%+06d Z%+06d",
+                        (int)( mpu9150.gyro_y * 0.01526 ),
+                        (int)( mpu9150.gyro_z * 0.01526) );
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
@@ -884,11 +890,18 @@ int main( void )
 
         case DispStatus:
             /* Status */
-            if ( display_changed || sec_timer ) {
+            if ( display_changed || ( sec_timer == 0 ) ) {
                 st7032i_clear();
+                clear_line_buf();
 
-                sprintf( line_str[0], "CLK:%lu", now_system_clock );
-                sprintf( line_str[1], "FILE:%d%%", (int)( (float)fp.current_sector / fp.max_sector_count * 100 ) );
+                snprintf( line_str[0], 17, "CLK:%lu", now_system_clock );
+
+                if ( write_dev ) {
+                    snprintf( line_str[1], 17, "%s:%d%% %d",
+                            file_name,
+                            (int)( (float)fp.current_sector / fp.max_sector_count * 100 ),
+                            max_fifo_level );
+                }
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -901,8 +914,6 @@ int main( void )
         case DispFormat:
             /* フォーマット */
             if ( display_changed ) {
-                st7032i_clear();
-
                 /* If writing now, Format is failed */
                 if ( write_dev ) {
                     st7032i_puts( 0, 0, "Format SDCard" );
@@ -919,7 +930,7 @@ int main( void )
                     if ( pushed_input & SW_START ) {
                         /* Start format */
                         st7032i_clear();
-                        st7032i_puts( 0, 0, "Formatting now" );
+                        st7032i_puts( 0, 0, "Format SDCard" );
                         st7032i_puts( 1, 0, "Please wait" );
 
                         /* format */
@@ -927,6 +938,7 @@ int main( void )
 
                         /* Put message */
                         st7032i_clear();
+                        st7032i_puts( 0, 0, "Format SDCard" );
 
                         if ( ret ) {
                             st7032i_puts( 1, 0, "Succeeded" );
@@ -942,9 +954,7 @@ int main( void )
 
                         /* GPSバッファをクリア */
                         cli();
-                        while ( fifo_can_read( &gps_fifo ) ) {
-                            fifo_read( &gps_fifo, &data );
-                        }
+                        fifo_clear( &gps_fifo );
                         sei();
                     }
                 }
@@ -962,11 +972,14 @@ int main( void )
 
                 st7032i_clear();
                 st7032i_puts( 0, 0, "Start writing" );
-                st7032i_puts( 1, 0, "Y:START N:STOP" );
+                st7032i_puts( 1, 0, "Y:START/N:STOP" );
+
+                /* ユーザーが読むのを少しまつ */
+                _delay_ms( 1000 );
 
                 /* Read EEPROM */
                 eeprom_busy_wait();
-                write_dev_buf = eeprom_read_byte( 0x00 );
+                write_dev_buf = ( DEV_ACC | DEV_GPS | DEV_GYRO | DEV_MAG | DEV_PRESS | DEV_TEMP ) & eeprom_read_byte( 0x00 );
 
                 display_changed = 0;
             } else {
@@ -974,23 +987,29 @@ int main( void )
                 if ( pushed_input & SW_START ) {
                     if ( write_dev_buf ) {
                         /* Create file */
-                        micomfs_fcreate( &fs, &fp, "log", MICOMFS_MAX_FILE_SECOTR_COUNT );
+                        if ( !micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT ) ) {
+                            /* ファイルの確保失敗 */
+                            st7032i_clear();
+                            st7032i_puts( 0, 0, "Writing failed!" );
+                            st7032i_puts( 1, 0, "Cant create file" );
+                        } else {
+                            /* Start file writing */
+                            micomfs_start_fwrite( &fp, 0 );
 
-                        /* Start file writing */
-                        micomfs_start_fwrite( &fp, 0 );
+                            /* Update write flag */
+                            write_dev = write_dev_buf;
 
-                        /* Update write flag */
-                        write_dev = write_dev_buf;
+                            /* Write EEPROM */
+                            eeprom_busy_wait();
+                            eeprom_write_byte( 0x00, write_dev );
 
-                        /* Put message */
-                        st7032i_clear();
-                        st7032i_puts( 0, 0, "Start Writing" );
-
-                        /* Write EEPROM */
-                        eeprom_busy_wait();
-                        eeprom_write_byte( 0x00, write_dev );
+                            /* Put message */
+                            st7032i_clear();
+                            st7032i_puts( 0, 0, "Start Writing" );
+                            st7032i_puts( 1, 0, "Succeeded" );
+                        }
                     } else {
-                        /* Since nothing is selected, Writing fails */
+                        /* Since nothing is selected, The Writing fails */
                         st7032i_clear();
                         st7032i_puts( 0, 0, "Writing failed!" );
                         st7032i_puts( 1, 0, "Please select" );
@@ -1005,9 +1024,7 @@ int main( void )
 
                     /* GPSバッファをクリア */
                     cli();
-                    while ( fifo_can_read( &gps_fifo ) ) {
-                        fifo_read( &gps_fifo, &data );
-                    }
+                    fifo_clear( &gps_fifo );
                     sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Stop writing */
@@ -1016,9 +1033,7 @@ int main( void )
 
                     /* GPSバッファをクリア */
                     cli();
-                    while ( fifo_can_read( &gps_fifo ) ) {
-                        fifo_read( &gps_fifo, &data );
-                    }
+                    fifo_clear( &gps_fifo );
                     sei();
                 } else {
                     /* Select sensor */
@@ -1141,7 +1156,7 @@ int main( void )
             if ( display_changed ) {
                 st7032i_clear();
                 st7032i_puts( 0, 0, "Stop writing" );
-                st7032i_puts( 1, 0, "Y:START N:STOP" );
+                st7032i_puts( 1, 0, "Y:START/N:STOP" );
 
                 display_changed = 0;
             } else {
@@ -1149,7 +1164,7 @@ int main( void )
                 if ( pushed_input & SW_START ) {
                     /* Stop writing */
                     st7032i_clear();
-                    st7032i_puts( 0, 0, "Stopping now" );
+                    st7032i_puts( 0, 0, "Stop writing" );
                     st7032i_puts( 1, 0, "Please wait" );
 
                     /* Stop file writing */
@@ -1161,6 +1176,7 @@ int main( void )
 
                     /* Put message */
                     st7032i_clear();
+                    st7032i_puts( 0, 0, "Stop writing" );
 
                     if ( ret ) {
                         st7032i_puts( 1, 0, "Succeeded" );
@@ -1177,9 +1193,7 @@ int main( void )
 
                     /* GPSバッファをクリア */
                     cli();
-                    while ( fifo_can_read( &gps_fifo ) ) {
-                        fifo_read( &gps_fifo, &data );
-                    }
+                    fifo_clear( &gps_fifo );
                     sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Update display */
@@ -1188,9 +1202,7 @@ int main( void )
 
                     /* GPSバッファをクリア */
                     cli();
-                    while ( fifo_can_read( &gps_fifo ) ) {
-                        fifo_read( &gps_fifo, &data );
-                    }
+                    fifo_clear( &gps_fifo );
                     sei();
                 }
             }
@@ -1201,202 +1213,6 @@ int main( void )
             break;
         }
     }
-
-
-
-
-#if 0
-
-
-/*
-    DispNone,
-    DispGPS1,
-    DispGPS2,
-    DispPressTemp,
-    DispAcc,
-    DispMag,
-    DispGyro,
-    DispStatus,
-    DispFormat,
-    DispStartWrite,
-    DispStopWrite,
-
-    DEV_PRESS = 0x01,
-    DEV_GYRO  = 0x02,
-    DEV_MAG   = 0x04,
-    DEV_ACC   = 0x08,
-    DEV_TEMP  = 0x10,
-    DEV_GPS   = 0x20,
-    DEV_SD    = 0x40,
-
-*/
-
-
-
-
-
-
-    /* 全センサー測定開始（ 連続なもの ） */
-    lps331ap_start( &pres );
-
-    /* DEBUG */
-    /* fs初期化 */
-    if ( use_sd ) {
-        int i;
-        int j;
-
-        /* フォーマット */
-        micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 4, 0 );
-
-        /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "ATMEGA.txt", 1 );
-
-        /* 書きまくる */
-        for ( i = 0; i < 3; i++ ) {
-            micomfs_start_fwrite( &fp, i );
-
-            for ( j = 0; j < fs.sector_size; j++ ) {
-                data = 0xFA;
-
-                micomfs_fwrite( &fp, &data, 1 );
-            }
-
-            micomfs_stop_fwrite( &fp, 0 );
-        }
-
-        /* ファイル閉じる */
-        micomfs_fclose( &fp );
-
-        /* ファイル作る */
-        micomfs_fcreate( &fs, &fp, "foooo.txt", MICOMFS_MAX_FILE_SECOTR_COUNT );
-
-        /* 書きまくる */
-        for( i = 0; micomfs_start_fwrite( &fp, i ); i++ ) {
-            // micomfs_start_fwrite( &fp, i );
-
-            for ( j = 0; j < fs.sector_size; j++ ) {
-                data = 0x3C;
-
-                micomfs_fwrite( &fp, &data, 1 );
-            }
-
-            micomfs_stop_fwrite( &fp, 0 );
-
-            // put
-            sprintf( line_str, "%u", i );
-            st7032i_puts( 0, 0, line_str );
-        }
-
-        /* ファイル閉じる */
-        micomfs_fclose( &fp );
-
-        st7032i_puts( 1, 0, "Fyuu" );
-
-        /* 第一セクター15バイトを全部USARTにぶちまける */
-        /*
-        for ( i = 0; i < 10; i++ ) {
-            sd_start_step_block_read( i );
-
-            for ( j = 0; j < fs.sector_size; j++ ) {
-                data = sd_step_block_read();
-
-                while ( !usart_can_write() );
-                usart_write( data );
-            }
-
-            sd_stop_step_block_read();
-        }
-        */
-
-        /*
-        sd_block_read( 0, buf, 0, 15 );
-        for ( i = 0; i < sizeof( buf ); i++ ) {
-            while ( !usart_can_write() );
-            usart_write( buf[i] );
-        }
-        */
-
-        while ( 1 );
-    }
-
-    /* メインルーチン */
-    while ( 1 ) {
-        /* ボタン */
-        if ( !( PIND & _BV( PD4 ) ) ) {
-            PORTB |= _BV( PB0 );
-        } else {
-            PORTB &= ~_BV( PB0 );
-        }
-
-        /* Display battery level */
-        switch ( get_battery_level() ) {
-        case 0:
-            st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame );
-            break;
-        case 1:
-            st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame | ST7032IIconBattL1 );
-            break;
-        case 2:
-            st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame | ST7032IIconBattL1 | ST7032IIconBattL2 );
-            break;
-        case 3:
-            st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame | ST7032IIconBattL1 | ST7032IIconBattL2 | ST7032IIconBattL3 );
-            break;
-        default:
-            break;
-        }
-
-        if ( fifo_level( &gps_fifo ) > max_level ) {
-            max_level = fifo_level( &gps_fifo );
-        }
-
-        sprintf( line_str, "%d", max_level );
-        st7032i_puts( 1, 0, line_str );
-
-        cli();
-        while ( fifo_read( &gps_fifo, &data ) );
-        sei();
-
-        /*
-        while ( !usart_can_write() );
-        if ( fifo_read( &gps_fifo, &data ) ) {
-            usart_write( data );
-        }
-        */
-
-        /* 全データ取得デバッグ */
-
-        /* 単独測定開始 */
-        ak8975_start( &mag );
-
-        /* 全センサーDRDY確認 */
-        while ( !( ak8975_data_ready( &mag ) && mpu9150_data_ready( &mpu9150 ) && lps331ap_data_ready( &pres ) ) );
-
-        /* 全センサー受信 */
-        ak8975_read( &mag );
-        mpu9150_read( &mpu9150 );
-        lps331ap_read( &pres );
-
-        /* 補正・計算 */
-        ak8975_calc_adjusted_h( &mag );
-
-        /* 全てusartへ送信 Acc Gyro Mag Temp */
-        sprintf( dbg, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
-                 mpu9150.acc_x, mpu9150.acc_y, mpu9150.acc_z,
-                 mpu9150.gyro_x, mpu9150.gyro_y, mpu9150.gyro_z,
-                 mag.adj_x, mag.adj_y, mag.adj_z,
-                 mag.x, mag.y, mag.z,
-                 (int)( pres.pressure / 4096 ),
-                 (int)mpu9150_get_temp_in_c( &mpu9150 ) );
-        debug_puts( dbg );
-
-        /* 気圧表示 */
-        sprintf( line_str, "%d          ", (int)( pres.pressure / 4096 ) );
-        st7032i_puts( 0, 0, line_str );
-    }
-
-#endif
-
 
     /* 終了 */
     return 0;
