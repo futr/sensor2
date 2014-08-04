@@ -1,7 +1,7 @@
 #include "micomfs_dev.h"
 #include "sd.h"
 
-char micomfs_dev_get_info( uint16_t *sector_size, uint32_t *sector_count )
+char micomfs_dev_get_info( MicomFS *fs, uint16_t *sector_size, uint32_t *sector_count )
 {
     /* ファイルシステムに必要な情報を返す */
     *sector_size  = sd_get_block_size();

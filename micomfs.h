@@ -41,9 +41,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 #define MICOMFS_SIGNATURE 0x5E
 #define MICOMFS_MAX_FILE_SECOTR_COUNT 0xFFFFFFFF
+#define MICOMFS_MAX_FILE_NAME_LENGTH  128
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,6 +93,14 @@ typedef struct {
     uint32_t sector_count;          /* セクター数 ( 先頭セクター含む ) */
     uint16_t entry_count;           /* 全エントリー数 */
     uint16_t used_entry_count;      /* 使用済みエントリー数 */
+
+    /* PCなど用拡張情報 */
+    /*
+    void *device;
+    char *dev_name;
+    uint32_t dev_current_sector;
+    uint16_t dev_current_spos;
+    */
 } MicomFS;
 
 typedef struct {
@@ -104,14 +115,15 @@ typedef struct {
     uint32_t sector_count;      /* ファイルのセクター数 */
     uint32_t max_sector_count;  /* ファイルの最大セクター数 */
 
-    const char *name;           /* ファイル名 : ポインタしか保持しない！ */
+    char *name;                 /* ファイル名 : ポインタしか保持しない！ */
 } MicomFSFile;
 
-char micomfs_init_fs( MicomFS *fs );
+char micomfs_init_fs( MicomFS *fs/*, const char *dev_name */ );
+// char micomfs_close_fs( MicomFS *fs );
 char micomfs_format( MicomFS *fs, uint16_t sector_size, uint32_t sector_count, uint16_t entry_count, uint16_t used_entry_count );
 
-char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, const char *name, uint32_t reserved_sector_count );
-char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, const char *name );
+char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, char *name, uint32_t reserved_sector_count );
+char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, char *name );
 char micomfs_fclose( MicomFSFile *fp );
 
 char micomfs_start_fwrite( MicomFSFile *fp, uint32_t sector );
@@ -134,7 +146,7 @@ char micomfs_write_entry( MicomFSFile *fp );
 /*
 char micomfs_fdelete( MicomFS *fs, const char *name );
 char micomfs_clean( MicomFS *fs );
-char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t count );
+char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count );
 */
 
 #ifdef __cplusplus

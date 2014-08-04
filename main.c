@@ -3,6 +3,7 @@
  * ファイルシステムのチェック
  * たとえば、許容３にしてちゃんとエラーになるか、ダンプをみるとちゃんと構成されているか。
  * ファイルを書きながら終了した場合、全セクターリザーブされているので、エラーにならないとおかしい。
+ * Make sure the error message occur if there is any file error.
  *
  * センサーの更新感覚をもう少し遅く。
  *
@@ -197,7 +198,7 @@ int main( void )
     uint8_t gps_ready;
 
     uint8_t sec_timer01;
-    uint8_t sec_timer02;
+    uint8_t update_timer;
     uint8_t sec_timer;
     uint32_t before_system_clock;
     uint32_t now_system_clock;
@@ -213,6 +214,7 @@ int main( void )
     MicomFSFile fp;
 
     int max_fifo_level = 0;
+    int fifolevel;
     uint8_t data;
     int i;
     int j;
@@ -303,7 +305,7 @@ int main( void )
     system_clock        = 0;
     sec_timer   = 0;
     sec_timer01 = 0;
-    sec_timer02 = 0;
+    update_timer = 0;
     max_fifo_level = 0;
 
     /* Init file name */
@@ -429,10 +431,8 @@ int main( void )
             max_fifo_level = fifo_level( &gps_fifo );
         }
 
-        /* GPSデーターが書きこみ単位以上たまってれば処理 ( なぜか >= だとミスる　FIFOにバグあり？ ) */
-        if ( ( enabled_dev & DEV_GPS ) && ( fifo_level( &gps_fifo ) >= GPS_WRITE_UNIT ) ) {
-            /* 書きこみ単位分処理 */
-
+        /* GPSデーターが書きこみ単位以上たまってれば処理 */
+        if ( ( enabled_dev & DEV_GPS ) && ( ( fifolevel = fifo_level( &gps_fifo ) ) >= GPS_WRITE_UNIT ) ) {
             /* 必要ならヘッダ書き込み */
             if ( write_dev & DEV_GPS ) {
                 data = LOG_SIGNATURE;
@@ -444,8 +444,11 @@ int main( void )
                 micomfs_seq_fwrite( &fp, &data, 1 );
             }
 
+            /* この時点でたまってしまった分も追加読み */
+            fifolevel = fifo_level( &gps_fifo );
+
             /* 全バイト処理 */
-            for ( i = 0; i < GPS_WRITE_UNIT; i++ ) {
+            for ( i = 0; i < fifolevel; i++ ) {
                 /* 1バイトよみ */
                 cli();
                 ret = fifo_read( &gps_fifo, &data );
@@ -477,7 +480,7 @@ int main( void )
                         case GPGGA:
                             switch ( sentence_pos ) {
                             case 0:
-                                if ( display == DispGPS1 ) {
+                                if ( display == DispGPS2 ) {
                                     /* 時刻をバッファに印字 */
                                     line_str[0][0] = elem_buf[0];
                                     line_str[0][1] = elem_buf[1];
@@ -489,8 +492,10 @@ int main( void )
                                     line_str[0][7] = elem_buf[5];
                                     line_str[0][8] = 'S';
                                     line_str[0][9] = ' ';
+                                }
 
-                                    /* ついでにファイル名にもコピー */
+                                /* ついでにファイルアクセス中でなければファイル名にもコピー */
+                                if ( !write_dev ) {
                                     memcpy( file_name, elem_buf, 6 );
                                     file_name[6] = '¥0';
                                 }
@@ -498,7 +503,7 @@ int main( void )
                                 break;
 
                             case 1:
-                                if ( display == DispGPS2 ) {
+                                if ( display == DispGPS1 ) {
                                     /* 緯度 */
                                     for ( j = 0; j < 16; j++ ) {
                                         line_str[1][j] = ' ';
@@ -531,7 +536,7 @@ int main( void )
                                 break;
 
                             case 2:
-                                if ( display == DispGPS2 ) {
+                                if ( display == DispGPS1 ) {
                                     /* 緯度の向き */
                                     if ( elem_buf[0] != ',' ) {
                                         line_str[1][15] = elem_buf[0];
@@ -541,7 +546,7 @@ int main( void )
                                 break;
 
                             case 3:
-                                if ( display == DispGPS2 ) {
+                                if ( display == DispGPS1 ) {
                                     /* 経度 */
                                     for ( j = 0; j < 16; j++ ) {
                                         line_str[0][j] = ' ';
@@ -574,7 +579,7 @@ int main( void )
                                 break;
 
                             case 4:
-                                if ( display == DispGPS2 ) {
+                                if ( display == DispGPS1 ) {
                                     /* 経度の向き */
                                     if ( elem_buf[0] != ',' ) {
                                         line_str[0][15] = elem_buf[0];
@@ -584,7 +589,7 @@ int main( void )
                                 break;
 
                             case 5:
-                                if ( display == DispGPS1 ) {
+                                if ( display == DispGPS2 ) {
                                     /* 受信クオリティ */
                                     line_str[0][14] = 'Q';
                                     line_str[0][15] = elem_buf[0];
@@ -600,7 +605,7 @@ int main( void )
                                 break;
 
                             case 6:
-                                if ( display == DispGPS1 ) {
+                                if ( display == DispGPS2 ) {
                                     /* 衛星個数 */
                                     line_str[0][10] = 'S';
 
@@ -617,7 +622,7 @@ int main( void )
                                 break;
 
                             case 8:
-                                if ( display == DispGPS1 ) {
+                                if ( display == DispGPS2 ) {
                                     /* 高さ */
                                     for ( j = 0; j < 8; j++ ) {
                                         line_str[1][j] = ' ';
@@ -647,7 +652,7 @@ int main( void )
                         case GPRMC:
                             switch ( sentence_pos ) {
                             case 6:
-                                if ( display == DispGPS1 ) {
+                                if ( display == DispGPS2 ) {
                                     /* 速度しか使わない */
                                     for ( j = 0; j < 8; j++ ) {
                                         line_str[1][8 + j] = ' ';
@@ -768,10 +773,10 @@ int main( void )
 
         /* 0.3sec timer */
         if ( sec_timer01 ) {
-            if ( sec_timer02 < 2 ) {
-                sec_timer02++;
+            if ( update_timer < 5 ) {
+                update_timer++;
             } else {
-                sec_timer02 = 0;
+                update_timer = 0;
             }
         }
 
@@ -829,7 +834,7 @@ int main( void )
 
         case DispPressTemp:
             /* 気圧温度用 */
-            if ( display_changed || ( ( updated_dev & DEV_TEMP & DEV_PRESS ) && ( sec_timer02 == 0 ) ) ) {
+            if ( display_changed || ( ( updated_dev & DEV_TEMP & DEV_PRESS ) && ( update_timer == 0 ) ) ) {
                 st7032i_clear();
 
                 snprintf( line_str[0], 17, "Pres %d[hPa]", (int)( pres.pressure / 4096 ) );
@@ -845,7 +850,7 @@ int main( void )
 
         case DispAcc:
             /* 加速度 */
-            if ( display_changed || ( ( updated_dev & DEV_ACC ) && ( sec_timer02 == 0 ) ) ) {
+            if ( display_changed || ( ( updated_dev & DEV_ACC ) && ( update_timer == 0 ) ) ) {
                 snprintf( line_str[0], 17, "Acc[mG] X%+06d", (int)( mpu9150.acc_x * 0.122 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mpu9150.acc_y * 0.122 ),
@@ -860,7 +865,7 @@ int main( void )
 
         case DispMag:
             /* 地磁気 */
-            if ( display_changed || ( ( updated_dev & DEV_MAG ) && ( sec_timer02 == 0 ) ) ) {
+            if ( display_changed || ( ( updated_dev & DEV_MAG ) && ( update_timer == 0 ) ) ) {
                 snprintf( line_str[0], 17, "Mag[uT] X%+06d", (int)( mag.adj_x * 0.3 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mag.adj_y * 0.3 ),
@@ -1199,11 +1204,6 @@ int main( void )
                     /* Update display */
                     display = DispGPS1;
                     display_changed = 1;
-
-                    /* GPSバッファをクリア */
-                    cli();
-                    fifo_clear( &gps_fifo );
-                    sei();
                 }
             }
 

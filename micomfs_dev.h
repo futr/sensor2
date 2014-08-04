@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-char micomfs_dev_get_info( uint16_t *sector_size, uint32_t *sector_count );
+char micomfs_dev_get_info( MicomFS *fs, uint16_t *sector_size, uint32_t *sector_count );
 
 char micomfs_dev_start_write( MicomFS *fs, uint32_t sector );
 char micomfs_dev_write( MicomFS *fs, const void *src, uint16_t count );
