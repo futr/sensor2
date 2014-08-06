@@ -102,6 +102,8 @@ void st7032i_clear( void )
 
     data = 0x01;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
+
+    _delay_ms( 1 );
 }
 
 void st7032i_set_icon( ST7032IIconAddr address, ST7032IIcon on )

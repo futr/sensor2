@@ -1,11 +1,11 @@
-# Linux(Ubuntu)用avr-gcc用
+# Linux&Mac用avr-gcc用
 # 最後に出力される text + data がプログラムメモリーの使用量です．
 
 # デバイスと周波数[Hz]
 DEVICE = atmega328p
 F_CPU  = 8000000UL
 
-# FUSES ( Div8解除 )
+# FUSES
 LFUSE  = 0xf7
 HFUSE  = 0xd9
 EFUSE  = 0x07

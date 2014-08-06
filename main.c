@@ -36,11 +36,16 @@
 #define SW_NEXT   _BV( PB5 )
 
 static volatile uint32_t system_clock;  /* 100usごとにカウントされるタイマー */
-static uint8_t input_counter;
+static uint16_t input_counter;
 static volatile uint8_t input;
 static FIFO gps_fifo;
-static char gps_buf[80];
+static char gps_buf[200];
 static char line_str[2][17];
+
+// DEBUG
+static void *sp;
+static void *bv = RAMEND;
+static uint16_t min_sp = RAMEND;
 
 typedef enum {
     OtherSentence,
@@ -72,6 +77,11 @@ typedef enum {
     DEV_SD    = 0x40,
 } Devices;
 
+typedef enum {
+    TimerUpdate = 0x01,
+    TimerSec    = 0x02,
+} TimerFlags;
+
 ISR( USART_RX_vect )
 {
     /* USART受信割り込み */
@@ -93,13 +103,26 @@ ISR( TIMER0_COMPA_vect )
     /* システムクロックを100usごとに1更新 */
     system_clock++;
 
-    /* 20msごとに入力読み込み */
-    if ( 200 <= input_counter ) {
+    /* 50msごとに入力読み込み */
+    if ( 500 <= input_counter ) {
         input = ~PIND;
 
         input_counter = 0;
     } else {
         input_counter++;
+    }
+
+    // DEBUG
+    extern void *__brkval;
+    // extern void *__malloc_heap_start;
+    if ( __malloc_heap_start < bv ) {
+        bv = __malloc_heap_start;
+    }
+    // スタックポインタ保存
+    sp = SPL + SPH * 256;
+
+    if ( sp < min_sp ) {
+        min_sp = sp;
     }
 }
 
@@ -200,6 +223,7 @@ int main( void )
     uint8_t sec_timer01;
     uint8_t update_timer;
     uint8_t sec_timer;
+    TimerFlags timer_flags;
     uint32_t before_system_clock;
     uint32_t now_system_clock;
 
@@ -219,6 +243,9 @@ int main( void )
     int i;
     int j;
     int ret;
+
+    // DEBUG
+    malloc( 1 );
 
     /* 割り込み停止 */
     cli();
@@ -497,7 +524,7 @@ int main( void )
                                 /* ついでにファイルアクセス中でなければファイル名にもコピー */
                                 if ( !write_dev ) {
                                     memcpy( file_name, elem_buf, 6 );
-                                    file_name[6] = '¥0';
+                                    file_name[6] = '\0';
                                 }
 
                                 break;
@@ -751,9 +778,7 @@ int main( void )
 
         /* 0.1秒ごとに更新 */
         if ( now_system_clock > before_system_clock + 1000 ) {
-            /* バッテリレベル更新 */
-            display_battery_level();
-
+            /* 前回時刻更新 */
             before_system_clock = now_system_clock;
 
             /* 0.1sec */
@@ -762,26 +787,36 @@ int main( void )
             sec_timer01 = 0;
         }
 
+        /* タイマーフラッグクリア */
+        timer_flags = 0;
+
         /* 1sec timer */
         if ( sec_timer01 ) {
             if ( sec_timer < 10 ) {
                 sec_timer++;
             } else {
                 sec_timer = 0;
+
+                timer_flags |= TimerSec;
             }
         }
 
-        /* 0.3sec timer */
+        /* 0.2sec timer */
         if ( sec_timer01 ) {
-            if ( update_timer < 5 ) {
+            if ( update_timer < 2 ) {
                 update_timer++;
             } else {
                 update_timer = 0;
+
+                timer_flags |= TimerUpdate;
             }
         }
 
         /* アイコン表示更新 */
-        if ( display_changed || ( sec_timer == 0 ) ) {
+        if ( display_changed || ( timer_flags & TimerSec ) ) {
+            /* バッテリレベル更新 */
+            display_battery_level();
+
             if ( write_dev ) {
                 st7032i_set_icon( ST7032IIconAddrDataIn, ST7032IIconDataIn );
             } else {
@@ -834,7 +869,7 @@ int main( void )
 
         case DispPressTemp:
             /* 気圧温度用 */
-            if ( display_changed || ( ( updated_dev & DEV_TEMP & DEV_PRESS ) && ( update_timer == 0 ) ) ) {
+            if ( display_changed || ( timer_flags & TimerUpdate ) ) {
                 st7032i_clear();
 
                 snprintf( line_str[0], 17, "Pres %d[hPa]", (int)( pres.pressure / 4096 ) );
@@ -850,7 +885,7 @@ int main( void )
 
         case DispAcc:
             /* 加速度 */
-            if ( display_changed || ( ( updated_dev & DEV_ACC ) && ( update_timer == 0 ) ) ) {
+            if ( display_changed || ( timer_flags & TimerUpdate ) ) {
                 snprintf( line_str[0], 17, "Acc[mG] X%+06d", (int)( mpu9150.acc_x * 0.122 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mpu9150.acc_y * 0.122 ),
@@ -865,7 +900,7 @@ int main( void )
 
         case DispMag:
             /* 地磁気 */
-            if ( display_changed || ( ( updated_dev & DEV_MAG ) && ( update_timer == 0 ) ) ) {
+            if ( display_changed || ( timer_flags & TimerUpdate ) ) {
                 snprintf( line_str[0], 17, "Mag[uT] X%+06d", (int)( mag.adj_x * 0.3 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mag.adj_y * 0.3 ),
@@ -895,18 +930,25 @@ int main( void )
 
         case DispStatus:
             /* Status */
-            if ( display_changed || ( sec_timer == 0 ) ) {
+            if ( display_changed || ( timer_flags & TimerSec ) ) {
                 st7032i_clear();
                 clear_line_buf();
 
                 snprintf( line_str[0], 17, "CLK:%lu", now_system_clock );
 
+                // DEBUG
+                /*
                 if ( write_dev ) {
-                    snprintf( line_str[1], 17, "%s:%d%% %d",
+                    snprintf( line_str[1], 17, "%s:%d%% %d %p",
                             file_name,
                             (int)( (float)fp.current_sector / fp.max_sector_count * 100 ),
-                            max_fifo_level );
+                            max_fifo_level,
+                            min_sp );
                 }
+                */
+                snprintf( line_str[1], 17, "%d %u %u",
+                        max_fifo_level,
+                        min_sp, bv );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -1024,7 +1066,7 @@ int main( void )
                     _delay_ms( 1000 );
 
                     /* return */
-                    display = DispGPS1;
+                    display = DispNone;
                     display_changed = 1;
 
                     /* GPSバッファをクリア */
@@ -1033,7 +1075,7 @@ int main( void )
                     sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Stop writing */
-                    display = DispGPS1;
+                    display = DispNone;
                     display_changed = 1;
 
                     /* GPSバッファをクリア */
@@ -1050,7 +1092,7 @@ int main( void )
                             sensor_pos = DEV_PRESS;
                         }
                     } else if ( pushed_input & SW_TOGGLE ) {
-                        /* Toggle current sensor will be written */
+                        /* 指定センサーを書くかどうか切り替え */
                         if ( write_dev_buf & sensor_pos ) {
                             write_dev_buf &= ~sensor_pos;
                         } else {
@@ -1202,7 +1244,7 @@ int main( void )
                     sei();
                 } else if ( pushed_input & SW_STOP ) {
                     /* Update display */
-                    display = DispGPS1;
+                    display = DispNone;
                     display_changed = 1;
                 }
             }

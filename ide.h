@@ -6,5 +6,5 @@
 
 #ifndef F_CPU
 #include "debug.h"
-#include <avr/iom88.h>
+#include <avr/iom328p.h>
 #endif
