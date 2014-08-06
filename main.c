@@ -870,10 +870,8 @@ int main( void )
         case DispPressTemp:
             /* 気圧温度用 */
             if ( display_changed || ( timer_flags & TimerUpdate ) ) {
-                st7032i_clear();
-
-                snprintf( line_str[0], 17, "Pres %d[hPa]", (int)( pres.pressure / 4096 ) );
-                i = snprintf( line_str[1], 17, "Temp %d[%cC]", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
+                snprintf( line_str[0], 17, "Pres %d[hPa]  ", (int)( pres.pressure / 4096 ) );
+                i = snprintf( line_str[1], 17, "Temp %d[%cC]  ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
