@@ -1,7 +1,7 @@
 #include "micomfs.h"
 #include "micomfs_dev.h"
 
-char micomfs_init_fs( MicomFS *fs )
+char micomfs_init_fs( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
 {
     /* デバイスにアクセスしてFS初期化 */
     uint8_t signature;

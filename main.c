@@ -46,6 +46,10 @@ static char line_str[2][17];
 static void *sp;
 static void *bv = RAMEND;
 static uint16_t min_sp = RAMEND;
+static uint8_t fl_0, fl_0max;
+static uint8_t fl_1, fl_1max;
+static uint8_t fl_2, fl_2max;
+static uint8_t fl_3, fl_3max;
 
 typedef enum {
     OtherSentence,
@@ -66,16 +70,6 @@ typedef enum {
     DispStartWrite,
     DispStopWrite,
 } Display;
-
-typedef enum {
-    DEV_PRESS = 0x01,
-    DEV_GYRO  = 0x02,
-    DEV_MAG   = 0x04,
-    DEV_ACC   = 0x08,
-    DEV_TEMP  = 0x10,
-    DEV_GPS   = 0x20,
-    DEV_SD    = 0x40,
-} Devices;
 
 typedef enum {
     TimerUpdate = 0x01,
@@ -330,9 +324,9 @@ int main( void )
     before_system_clock = 0;
     now_system_clock    = 0;
     system_clock        = 0;
-    sec_timer   = 0;
-    sec_timer01 = 0;
-    update_timer = 0;
+    sec_timer      = 0;
+    sec_timer01    = 0;
+    update_timer   = 0;
     max_fifo_level = 0;
 
     /* Init file name */
@@ -357,6 +351,9 @@ int main( void )
         cli();
         now_system_clock = system_clock;
         sei();
+
+        // DEBUG
+        fl_0 = fifo_level( &gps_fifo );
 
         /* センサー情報取得 */
         if ( ( enabled_dev & DEV_PRESS ) && lps331ap_data_ready( &pres ) ) {
@@ -385,6 +382,11 @@ int main( void )
 
             updated_dev |= ( DEV_ACC | DEV_GYRO | DEV_TEMP );
         }
+
+        // DEBUG
+        fl_0 = fifo_level( &gps_fifo ) - fl_0;
+        fl_1 = fifo_level( &gps_fifo );
+
 
         /* 必要なら各センサーデータ処理と書き込み */
         if ( ( write_dev & DEV_PRESS ) && ( updated_dev & DEV_PRESS ) ) {
@@ -453,10 +455,16 @@ int main( void )
             micomfs_seq_fwrite( &fp, &mpu9150.temp, sizeof( mpu9150.temp ) );
         }
 
+        // DEBUG
+        fl_1 = fifo_level( &gps_fifo ) - fl_1;
+
         /* 最大FIFO使用量記録 ほぼDEBUG用 */
         if ( ( fifo_level( &gps_fifo ) > max_fifo_level ) && display <= DispFormat ) {
             max_fifo_level = fifo_level( &gps_fifo );
         }
+
+        // DEBUG
+        fl_2 = fifo_level( &gps_fifo );
 
         /* GPSデーターが書きこみ単位以上たまってれば処理 */
         if ( ( enabled_dev & DEV_GPS ) && ( ( fifolevel = fifo_level( &gps_fifo ) ) >= GPS_WRITE_UNIT ) ) {
@@ -735,6 +743,10 @@ int main( void )
             }
         }
 
+        // DBEUG
+        fl_2 = fifo_level( &gps_fifo ) - fl_2;
+        fl_3 = fifo_level( &gps_fifo );
+
         /* スイッチ処理 */
         /* 押されたスイッチを調べる */
         pushed_input = ~before_input & input;
@@ -944,9 +956,12 @@ int main( void )
                             min_sp );
                 }
                 */
+                /*
                 snprintf( line_str[1], 17, "%d %u %u",
                         max_fifo_level,
                         min_sp, bv );
+                */
+                snprintf( line_str[1], 17, "%d %d %d %d", fl_0max, fl_1max, fl_2max, fl_3max );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -1031,8 +1046,12 @@ int main( void )
                 /* Check keys */
                 if ( pushed_input & SW_START ) {
                     if ( write_dev_buf ) {
+                        /* 開始するたびにFS初期化とファイル作成 */
+                        ret  = micomfs_init_fs( &fs, NULL, MicomFSDeviceAuto );
+                        ret *= micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT );
+
                         /* Create file */
-                        if ( !micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT ) ) {
+                        if ( !ret ) {
                             /* ファイルの確保失敗 */
                             st7032i_clear();
                             st7032i_puts( 0, 0, "Writing failed!" );
@@ -1040,6 +1059,14 @@ int main( void )
                         } else {
                             /* Start file writing */
                             micomfs_start_fwrite( &fp, 0 );
+
+                            /* Write signature */
+                            data = DEVICE_LOG_SIGNATURE;
+                            micomfs_seq_fwrite( &fp, &data, 1 );
+
+                            /* Write device list */
+                            data = write_dev_buf;
+                            micomfs_seq_fwrite( &fp, &data, 1 );
 
                             /* Update write flag */
                             write_dev = write_dev_buf;
@@ -1252,7 +1279,23 @@ int main( void )
         default:
             break;
         }
+
+        // DEBUG
+        fl_3 = fifo_level( &gps_fifo ) - fl_3;
+        if ( fl_0 > fl_0max ) {
+            fl_0max = fl_0;
+        }
+        if ( fl_1 > fl_1max ) {
+            fl_1max = fl_1;
+        }
+        if ( fl_2 > fl_2max ) {
+            fl_2max = fl_2;
+        }
+        if ( fl_3 > fl_3max ) {
+            fl_3max = fl_3;
+        }
     }
+
 
     /* 終了 */
     return 0;
