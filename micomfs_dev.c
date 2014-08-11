@@ -10,6 +10,18 @@ char micomfs_dev_get_info( MicomFS *fs, uint16_t *sector_size, uint32_t *sector_
     return 1;
 }
 
+char micomfs_dev_open( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
+{
+    /* デバイスを開く */
+    return 1;
+}
+
+char micomfs_dev_close( MicomFS *fs )
+{
+    /* デバイスを閉じる */
+    return 1;
+}
+
 char micomfs_dev_start_write( MicomFS *fs, uint32_t sector )
 {
     /* セクターライト開始 */

@@ -1,7 +1,21 @@
 #include "micomfs.h"
 #include "micomfs_dev.h"
 
-char micomfs_init_fs( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
+#if 0
+char micomfs_open_device( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
+{
+    /* デバイスを開く */
+    return micomfs_dev_open( fs, dev_name, dev_type );
+}
+
+char micomfs_close_device( MicomFS *fs )
+{
+    /* デバイスを閉じる */
+    return micomfs_dev_close( fs );
+}
+#endif
+
+char micomfs_init_fs( MicomFS *fs )
 {
     /* デバイスにアクセスしてFS初期化 */
     uint8_t signature;
@@ -523,3 +537,30 @@ char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
         }
     }
 }
+
+#if 0
+char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count )
+{
+    /* ファイルリスト取得 */
+    uint32_t i;
+    MicomFSFile *flist;
+
+    /* Create file list */
+    flist = (MicomFSFile *)malloc( sizeof( MicomFSFile ) * fs->used_entry_count );
+
+    /* 指定ファイル名と一致するエントリを探る */
+    for ( i = 0; i < fs->used_entry_count; i++ ) {
+        /* Create file name pointer */
+        flist[i].name = malloc( sizeof(char) * MICOMFS_MAX_FILE_NAME_LENGTH );
+
+        /* iエントリー読み込み */
+        micomfs_read_entry( fs, flist + i, i, NULL );
+    }
+
+    /* return */
+    *list  = flist;
+    *count = fs->used_entry_count;
+
+    return 1;
+}
+#endif
