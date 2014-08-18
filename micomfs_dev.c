@@ -10,7 +10,7 @@ char micomfs_dev_get_info( MicomFS *fs, uint16_t *sector_size, uint32_t *sector_
     return 1;
 }
 
-char micomfs_dev_open( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
+char micomfs_dev_open( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type, MicomFSDeviceMode dev_mode )
 {
     /* デバイスを開く */
     return 1;

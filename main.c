@@ -107,6 +107,7 @@ ISR( TIMER0_COMPA_vect )
     }
 
     // DEBUG
+    /*
     extern void *__brkval;
     // extern void *__malloc_heap_start;
     if ( __malloc_heap_start < bv ) {
@@ -118,6 +119,7 @@ ISR( TIMER0_COMPA_vect )
     if ( sp < min_sp ) {
         min_sp = sp;
     }
+    */
 }
 
 char get_battery_level( void )
@@ -238,9 +240,6 @@ int main( void )
     int j;
     int ret;
 
-    // DEBUG
-    malloc( 1 );
-
     /* 割り込み停止 */
     cli();
 
@@ -301,11 +300,12 @@ int main( void )
     display_battery_level();
 
     /* Welcome message */
-    st7032i_puts( 0, 0, "Sensor recorder" );
+    st7032i_puts( 0, 0, "System status" );
     ( enabled_dev & DEV_SD    ) ? st7032i_puts( 1, 0,  "SD:O" ) : st7032i_puts( 1, 0,  "SD:X" );
     ( enabled_dev & DEV_PRESS ) ? st7032i_puts( 1, 5,  "PR:O" ) : st7032i_puts( 1, 5,  "PR:X" );
     ( enabled_dev & DEV_ACC   ) ? st7032i_puts( 1, 10, "3D:O" ) : st7032i_puts( 1, 10, "3D:X" );
 
+    /* Wait */
     _delay_ms( 1000 );
 
     /* USART起動 */
@@ -313,24 +313,24 @@ int main( void )
 
     /* 各種変数初期化 */
     display_changed = 1;
-    write_dev     = 0;
-    write_dev_buf = 0;
-    sentence      = OtherSentence;
-    sentence_pos  = 0;
-    elem_pos      = 0;
-    display       = DispGPS1;
-    gps_ready     = 0;
-    sensor_pos    = 0;
+    write_dev       = 0;
+    write_dev_buf   = 0;
+    sentence        = OtherSentence;
+    sentence_pos    = 0;
+    elem_pos        = 0;
+    display         = DispGPS1;
+    gps_ready       = 0;
+    sensor_pos      = 0;
     before_system_clock = 0;
     now_system_clock    = 0;
     system_clock        = 0;
-    sec_timer      = 0;
-    sec_timer01    = 0;
-    update_timer   = 0;
-    max_fifo_level = 0;
+    sec_timer       = 0;
+    sec_timer01     = 0;
+    update_timer    = 0;
+    max_fifo_level  = 0;
 
     /* Init file name */
-    strcpy( file_name, "log" );
+    strcpy( file_name, "log.log" );
 
     /* ピン入力初期化 */
     input = ~PIND;
@@ -530,9 +530,13 @@ int main( void )
                                 }
 
                                 /* ついでにファイルアクセス中でなければファイル名にもコピー */
-                                if ( !write_dev ) {
+                                if ( !write_dev && elem_pos >= 6 ) {
                                     memcpy( file_name, elem_buf, 6 );
-                                    file_name[6] = '\0';
+                                    file_name[6]  = '.';
+                                    file_name[7]  = 'l';
+                                    file_name[8]  = 'o';
+                                    file_name[9]  = 'g';
+                                    file_name[10] = '\0';
                                 }
 
                                 break;
@@ -1047,7 +1051,7 @@ int main( void )
                 if ( pushed_input & SW_START ) {
                     if ( write_dev_buf ) {
                         /* 開始するたびにFS初期化とファイル作成 */
-                        ret  = micomfs_init_fs( &fs, NULL, MicomFSDeviceAuto );
+                        ret  = micomfs_init_fs( &fs );
                         ret *= micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT );
 
                         /* Create file */

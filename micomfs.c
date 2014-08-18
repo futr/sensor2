@@ -1,11 +1,10 @@
 #include "micomfs.h"
 #include "micomfs_dev.h"
 
-#if 0
-char micomfs_open_device( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type )
+char micomfs_open_device(MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type , MicomFSDeviceMode mode )
 {
     /* デバイスを開く */
-    return micomfs_dev_open( fs, dev_name, dev_type );
+    return micomfs_dev_open( fs, dev_name, dev_type, mode );
 }
 
 char micomfs_close_device( MicomFS *fs )
@@ -13,7 +12,6 @@ char micomfs_close_device( MicomFS *fs )
     /* デバイスを閉じる */
     return micomfs_dev_close( fs );
 }
-#endif
 
 char micomfs_init_fs( MicomFS *fs )
 {
@@ -147,6 +145,7 @@ char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, char *name, uint32_t reserve
     fp->spos = 0;
     fp->status = MicomFSFileStatusStop;
     fp->name = name;
+    fp->mode = MicomFSFileModeWrite;
 
     /* エントリー書き出し */
     micomfs_write_entry( fp );
@@ -199,7 +198,7 @@ char micomfs_read_entry( MicomFS *fs, MicomFSFile *fp, uint16_t entry_id, const 
         }
 
         len_read++;
-    } while ( data != '\0' );
+    } while ( data != 0 );
 
     /* 残り */
     for ( i = 0; i < fs->sector_size - ( 9 + len_read ); i++ ) {
@@ -215,6 +214,7 @@ char micomfs_read_entry( MicomFS *fs, MicomFSFile *fp, uint16_t entry_id, const 
     fp->current_sector = 0;
     fp->entry_id = entry_id;
     fp->status = MicomFSFileStatusStop;
+    fp->mode   = MicomFSFileModeRead;
 
     if ( same ) {
         return MicomFSReturnSameName;
@@ -261,7 +261,7 @@ char micomfs_write_entry( MicomFSFile *fp )
 }
 
 
-char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, char *name )
+char micomfs_fopen(MicomFS *fs, MicomFSFile *fp, MicomFSFileMode mode, char *name )
 {
     /* ファイルを開く */
     uint32_t i;
@@ -282,8 +282,9 @@ char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, char *name )
         return 0;
     }
 
-    /* Set the file name */
+    /* init */
     fp->name = name;
+    fp->mode = mode;
 
     return 1;
 }
@@ -299,8 +300,10 @@ char micomfs_fclose( MicomFSFile *fp )
         micomfs_stop_fwrite( fp, 0 );
     }
 
-    /* エントリーを書き込む */
-    micomfs_write_entry( fp );
+    /* 必要ならエントリーを書き込む */
+    if ( fp->mode == MicomFSFileModeReadWrite || fp->mode == MicomFSFileModeWrite ) {
+        micomfs_write_entry( fp );
+    }
 
     return 1;
 }
@@ -359,7 +362,9 @@ char micomfs_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
         return 0;
     }
 
-    micomfs_dev_write( fp->fs, src, count );
+    if ( !micomfs_dev_write( fp->fs, src, count ) ) {
+        return 0;
+    }
 
     /* カーソル進む */
     fp->spos += count;
@@ -376,7 +381,9 @@ char micomfs_fread( MicomFSFile *fp, void *dest, uint16_t count )
         return 0;
     }
 
-    micomfs_dev_read( fp->fs, dest, count );
+    if ( !micomfs_dev_read( fp->fs, dest, count ) ) {
+        return 0;
+    }
 
     /* カーソル進む */
     fp->spos += count;
@@ -453,8 +460,9 @@ char micomfs_seq_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
     /* つづけて自動書き込み */
     uint16_t pos = 0;
     uint16_t rest = count;
+    uint16_t bspos;
 
-    /* 始めてなければ失敗 */
+    /* はじめてなければ失敗 */
     if ( fp->status != MicomFSFileStatusWrite ) {
         return 0;
     }
@@ -473,14 +481,22 @@ char micomfs_seq_fwrite( MicomFSFile *fp, const void *src, uint16_t count )
 
         /* 可能な限り一気にアクセス */
         if ( rest >= ( fp->fs->sector_size - fp->spos ) ) {
-            /* セクターアクセス以上のこっているのでセクターアクセス分書き込み */
-            micomfs_fwrite( fp, (uint8_t *)src + pos, fp->fs->sector_size - fp->spos );
+            /* 位置調整 */
+            bspos = fp->spos;
 
-            pos  += fp->fs->sector_size - fp->spos;
-            rest -= fp->fs->sector_size - fp->spos;
+            /* セクターアクセス以上のこっているのでセクターアクセス分書き込み */
+            if ( !micomfs_fwrite( fp, (uint8_t *)src + pos, fp->fs->sector_size - fp->spos ) ) {
+                return 0;
+            }
+
+            /* 位置制御 */
+            pos  += fp->fs->sector_size - bspos;
+            rest -= fp->fs->sector_size - bspos;
         } else {
             /* セクターアクセスより残りが少ないので全部書き込み */
-            micomfs_fwrite( fp, (uint8_t *)src + pos, rest );
+            if ( !micomfs_fwrite( fp, (uint8_t *)src + pos, rest ) ) {
+                return 0;
+            }
 
             pos  += rest;
             rest -= rest;
@@ -498,8 +514,9 @@ char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
     /* つづけて自動読み込み */
     uint16_t pos  = 0;
     uint16_t rest = count;
+    uint16_t bspos;
 
-    /* 始めてなければ失敗 */
+    /* はじめてなければ失敗 */
     if ( fp->status != MicomFSFileStatusRead ) {
         return 0;
     }
@@ -518,14 +535,22 @@ char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
 
         /* 可能な限り一気にアクセス */
         if ( rest >= ( fp->fs->sector_size - fp->spos ) ) {
-            /* セクターアクセス以上のこっているのでセクターアクセス分書き込み */
-            micomfs_fread( fp, (uint8_t *)dest + pos, fp->fs->sector_size - fp->spos );
+            /* 位置調整 */
+            bspos = fp->spos;
 
-            pos  += fp->fs->sector_size - fp->spos;
-            rest -= fp->fs->sector_size - fp->spos;
+            /* セクターアクセス以上のこっているのでセクターアクセス分書き込み */
+            if ( !micomfs_fread( fp, (uint8_t *)dest + pos, fp->fs->sector_size - fp->spos ) ) {
+                return 0;
+            }
+
+            /* 位置制御 */
+            pos  += fp->fs->sector_size - bspos;
+            rest -= fp->fs->sector_size - bspos;
         } else {
             /* セクターアクセスより残りが少ないので全部書き込み */
-            micomfs_fread( fp, (uint8_t *)dest + pos, rest );
+            if ( !micomfs_fread( fp, (uint8_t *)dest + pos, rest ) ) {
+                return 0;
+            }
 
             pos  += rest;
             rest -= rest;
@@ -538,7 +563,8 @@ char micomfs_seq_fread( MicomFSFile *fp, void *dest, uint16_t count )
     }
 }
 
-#if 0
+#ifdef MICOMFS_ENABLE_EXFUNCTIONS
+
 char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count )
 {
     /* ファイルリスト取得 */
@@ -563,4 +589,5 @@ char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count )
 
     return 1;
 }
+
 #endif

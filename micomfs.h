@@ -4,10 +4,6 @@
  * FATなし、削除・拡張不可能
  * 読み込み・書きこみ単位はセクターのみ
  *
- * ファイル情報破壊を阻止するため、定期的に
- * micomfs_write_entry( MicomFSFile *fp );
- * を実行してください
- *
  * --- 制約 ---
  *
  * fcreateでファイルを作成した場合、そのファイルをfcloseするまで
@@ -18,9 +14,24 @@
  *
  */
 
-
 #ifndef MICOMFS_H_INCLUDED
 #define MICOMFS_H_INCLUDED
+
+/*
+ * パソコンなどのスペックに余裕があるデバイスで，
+ * MICOMFS_ENABLE_EXFUNCTIONS
+ * を有効にすると
+ * char micomfs_fdelete( MicomFS *fs, const char *name );
+ * char micomfs_clean_fs( MicomFS *fs );
+ * char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count );
+ * が利用可能になります
+ * ( clean_fsとfdeleteはまだ実装していません )
+ *
+ */
+
+/*
+#define MICOMFS_ENABLE_EXFUNCTIONS
+*/
 
 #include <stdio.h>
 #include <string.h>
@@ -43,24 +54,22 @@ typedef enum {
 } MicomFSDeviceType;
 
 typedef enum {
+    MicomFSDeviceModeRead,
+    MicomFSDeviceModeWrite,
+    MicomFSDeviceModeReadWrite,
+} MicomFSDeviceMode;
+
+typedef enum {
     MicomFSReturnFalse    = 0,
     MicomFSReturnTrue     = 1,
     MicomFSReturnSameName = 2,
 } MicomFSReturn;
 
-/*
 typedef enum {
     MicomFSFileModeRead,
     MicomFSFileModeWrite,
     MicomFSFileModeReadWrite,
 } MicomFSFileMode;
-*/
-
-typedef enum {
-    MicomFSFileAccessModeNormal       = 1 << 0,
-    MicomFSFileAccessModeAutoStop     = 1 << 1,
-    MicomFSFileAccessModeAutoContinue = 1 << 2,
-} MicomFSFileAccessMode;
 
 typedef enum {
     MicomFSFileStatusStop,
@@ -85,13 +94,11 @@ typedef struct {
     uint16_t used_entry_count;      /* 使用済みエントリー数 */
 
     /* PCなど用拡張情報 */
-    /*
     void *device;
     char *dev_name;
     uint32_t dev_current_sector;
     uint16_t dev_current_spos;
     MicomFSDeviceType dev_type;
-    */
 } MicomFS;
 
 typedef struct {
@@ -99,6 +106,7 @@ typedef struct {
     uint32_t current_sector;    /* アクセス中セクタ番号 */
     uint16_t spos;              /* セクター内位置 */
     MicomFSFileStatus status;   /* アクセス状態 */
+    MicomFSFileMode mode; /* Access mode */
 
     uint16_t entry_id;          /* このエントリのセクタ番号 */
     uint8_t  flag;              /* フラグ */
@@ -109,14 +117,14 @@ typedef struct {
     char *name;                 /* ファイル名 */
 } MicomFSFile;
 
-char micomfs_open_device( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type );
+char micomfs_open_device( MicomFS *fs, const char *dev_name, MicomFSDeviceType dev_type, MicomFSDeviceMode mode );
 char micomfs_close_device( MicomFS *fs );
 
 char micomfs_init_fs( MicomFS *fs );
 char micomfs_format( MicomFS *fs, uint16_t sector_size, uint32_t sector_count, uint16_t entry_count, uint16_t used_entry_count );
 
 char micomfs_fcreate( MicomFS *fs, MicomFSFile *fp, char *name, uint32_t reserved_sector_count );
-char micomfs_fopen( MicomFS *fs, MicomFSFile *fp, char *name );
+char micomfs_fopen(MicomFS *fs, MicomFSFile *fp, MicomFSFileMode mode, char *name );
 char micomfs_fclose( MicomFSFile *fp );
 
 char micomfs_start_fwrite( MicomFSFile *fp, uint32_t sector );
@@ -136,11 +144,9 @@ char micomfs_read_entry( MicomFS *fs, MicomFSFile *fp, uint16_t entry_id, const 
 char micomfs_write_entry( MicomFSFile *fp );
 
 /* 以下PCとか大富豪用 */
-/*
 char micomfs_fdelete( MicomFS *fs, const char *name );
 char micomfs_clean_fs( MicomFS *fs );
 char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count );
-*/
 
 #ifdef __cplusplus
 }
