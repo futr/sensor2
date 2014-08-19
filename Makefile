@@ -59,7 +59,7 @@ $(TARGET) : $(TARGET).hex
 	$(SIZE) $<
 
 eeprom : $(TARGET).elf
-    $(OBJCOPY) -j .eeprom --change-section-lma .eeprom=0 -O ihex $(TARGET).elf $(TARGET)_eeprom.hex
+	$(OBJCOPY) -j .eeprom --change-section-lma .eeprom=0 -O ihex $(TARGET).elf $(TARGET)_eeprom.hex
 
 install : $(TARGET)
 	$(SUDO) $(AVRDUDE) -P usb -c avrisp2 -p $(DEVICE) -U flash:w:$(TARGET).hex

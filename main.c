@@ -517,16 +517,27 @@ int main( void )
                             case 0:
                                 if ( display == DispGPS2 ) {
                                     /* 時刻をバッファに印字 */
-                                    line_str[0][0] = elem_buf[0];
-                                    line_str[0][1] = elem_buf[1];
                                     line_str[0][2] = 'H';
-                                    line_str[0][3] = elem_buf[2];
-                                    line_str[0][4] = elem_buf[3];
                                     line_str[0][5] = 'M';
-                                    line_str[0][6] = elem_buf[4];
-                                    line_str[0][7] = elem_buf[5];
                                     line_str[0][8] = 'S';
                                     line_str[0][9] = ' ';
+
+                                    if ( elem_pos >= 6 ) {
+                                        /* 時刻が６文字以上なら保存 */
+                                        line_str[0][0] = elem_buf[0];
+                                        line_str[0][1] = elem_buf[1];
+                                        line_str[0][3] = elem_buf[2];
+                                        line_str[0][4] = elem_buf[3];
+                                        line_str[0][6] = elem_buf[4];
+                                        line_str[0][7] = elem_buf[5];
+                                    } else {
+                                        line_str[0][0] = 'x';
+                                        line_str[0][1] = 'x';
+                                        line_str[0][3] = 'x';
+                                        line_str[0][4] = 'x';
+                                        line_str[0][6] = 'x';
+                                        line_str[0][7] = 'x';
+                                    }
                                 }
 
                                 /* ついでにファイルアクセス中でなければファイル名にもコピー */
