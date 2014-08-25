@@ -41,6 +41,7 @@ static volatile uint8_t input;
 static FIFO gps_fifo;
 static char gps_buf[200];
 static char line_str[2][17];
+static volatile uint8_t battery_level;
 
 // DEBUG
 static void *sp;
@@ -164,7 +165,9 @@ char get_battery_level( void )
 void display_battery_level( void )
 {
     /* バッテリレベル表示 */
-    switch ( get_battery_level() ) {
+    battery_level = get_battery_level();
+
+    switch ( battery_level ) {
     case 0:
         st7032i_set_icon( ST7032IIconAddrBattery, ST7032IIconBattFrame );
         break;
@@ -328,6 +331,7 @@ int main( void )
     sec_timer01     = 0;
     update_timer    = 0;
     max_fifo_level  = 0;
+    battery_level   = 0;
 
     /* Init file name */
     strcpy( file_name, "log.log" );
@@ -857,6 +861,25 @@ int main( void )
             }
         }
 
+        /* 書き込み中にバッテリレベルが低下したので書き込み中止 */
+        if ( write_dev && ( battery_level <= 1 ) ) {
+            /* Stop file writing */
+            micomfs_stop_fwrite( &fp, 0 );
+            micomfs_fclose( &fp );
+
+            /* 書き込み指示クリア */
+            write_dev = 0;
+
+            /* GPSバッファをクリア */
+            cli();
+            fifo_clear( &gps_fifo );
+            sei();
+
+            /* 画面表示をNoneに */
+            display = DispNone;
+            display_changed = 1;
+        }
+
         /* 画面ごとに分岐 */
         switch ( display ) {
         case DispNone:
@@ -897,7 +920,7 @@ int main( void )
         case DispPressTemp:
             /* 気圧温度用 */
             if ( display_changed || ( timer_flags & TimerUpdate ) ) {
-                snprintf( line_str[0], 17, "Pres %d[hPa]  ", (int)( pres.pressure / 4096 ) );
+                snprintf( line_str[0], 17, "Pres %d[Pa]  ", (int)( pres.pressure / 4096.0 * 100 ) );
                 i = snprintf( line_str[1], 17, "Temp %d[%cC]  ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
 
                 st7032i_puts( 0, 0, line_str[0] );
@@ -1060,7 +1083,13 @@ int main( void )
             } else {
                 /* Check keys */
                 if ( pushed_input & SW_START ) {
-                    if ( write_dev_buf ) {
+
+                    if ( battery_level <= 1 ) {
+                        /* バッテリーが電圧不足だと安全のため実行できない */
+                        st7032i_clear();
+                        st7032i_puts( 0, 0, "Writing failed!" );
+                        st7032i_puts( 1, 0, "Low battery" );
+                    } else if ( write_dev_buf ) {
                         /* 開始するたびにFS初期化とファイル作成 */
                         ret  = micomfs_init_fs( &fs );
                         ret *= micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT );
