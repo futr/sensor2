@@ -1,7 +1,8 @@
 #ifndef DEVICE_ID_H_INCLUDED
 #define DEVICE_ID_H_INCLUDED
 
-#define DEVICE_LOG_SIGNATURE 0x8E
+#define DEVICE_LOG_SIGNATURE 0x8E   /* ログファイル先頭のシグネチャ */
+#define LOG_SIGNATURE 0x3E          /* ログファイルのデーターごとの先頭バイトシグネチャ */
 
 typedef enum {
     ID_ADXL345,
