@@ -13,8 +13,6 @@ sd.c
 sd.h
 debug.c
 debug.h
-timer0.c
-timer0.h
 adxl345.h
 adxl345.c
 l3gd20.c
@@ -23,12 +21,10 @@ lps331ap.c
 lps331ap.h
 hmc5883l.h
 hmc5883l.c
-test.c
 device_id.h
 st7032i.h
 st7032i.c
 
-main-v1.c
 micomfs.c
 micomfs.h
 ak8975.c

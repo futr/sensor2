@@ -8,14 +8,6 @@
  *
  * 書き込みエラーが出た場合正常に終了する必要があるけど今は対策がないので作る
  *
- * fifolevelの設定に問題あり
- * ログにはGPS_WRITE_UNITで書き込んでいると指定しておきながら
- * 実際にはfifolevelで動的に指定しているため実際のサイズと一致していない
- * GPS_WRITE_UNITに設定してオーバーフローしないならそうするべき
- *
- * ログに正常に先頭シグネチャが書き込まれていないものを発見
- * 原因を調査すべき
- *
  * LOG_SIGUNATUREが印字可能文字範囲にあるのは大いに問題
  * 変えるべき
  *
@@ -39,7 +31,7 @@
 #include "fifo.h"
 #include "device_id.h"
 
-#define GPS_WRITE_UNIT 32       /* GPSデーターの書き込み単位 */
+#define GPS_WRITE_UNIT 32       /* GPSデーターの最小書き込み単位 */
 
 #define SW_STOP   _BV( PB7 )
 #define SW_START  _BV( PB6 )
@@ -125,13 +117,13 @@ ISR( TIMER0_COMPA_vect )
     if ( __malloc_heap_start < bv ) {
         bv = __malloc_heap_start;
     }
+    */
     // スタックポインタ保存
     sp = SPL + SPH * 256;
 
     if ( sp < min_sp ) {
         min_sp = sp;
     }
-    */
 }
 
 char get_battery_level( void )
@@ -249,6 +241,7 @@ int main( void )
 
     int max_fifo_level = 0;
     int fifolevel;
+    uint8_t readSize;
     uint8_t data;
     int i;
     int j;
@@ -483,6 +476,13 @@ int main( void )
 
         /* GPSデーターが書きこみ単位以上たまってれば処理 */
         if ( ( enabled_dev & DEV_GPS ) && ( ( fifolevel = fifo_level( &gps_fifo ) ) >= GPS_WRITE_UNIT ) ) {
+            /* 読み込み量決定 */
+            if ( fifolevel < 256 ) {
+                readSize = fifolevel;
+            } else {
+                readSize = 255;
+            }
+
             /* 必要ならヘッダ書き込み */
             if ( write_dev & DEV_GPS ) {
                 data = LOG_SIGNATURE;
@@ -490,15 +490,12 @@ int main( void )
                 micomfs_seq_fwrite( &fp, &now_system_clock, sizeof( now_system_clock ) );
                 data = ID_GPS;
                 micomfs_seq_fwrite( &fp, &data, 1 );
-                data = GPS_WRITE_UNIT;
+                data = readSize;
                 micomfs_seq_fwrite( &fp, &data, 1 );
             }
 
-            /* この時点でたまってしまった分も追加読み */
-            fifolevel = fifo_level( &gps_fifo );
-
             /* 全バイト処理 */
-            for ( i = 0; i < fifolevel; i++ ) {
+            for ( i = 0; i < readSize; i++ ) {
                 /* 1バイトよみ */
                 cli();
                 ret = fifo_read( &gps_fifo, &data );
@@ -931,7 +928,7 @@ int main( void )
         case DispPressTemp:
             /* 気圧温度用 */
             if ( display_changed || ( timer_flags & TimerUpdate ) ) {
-                snprintf( line_str[0], 17, "Pres %d[Pa]  ", (int)( pres.pressure / 4096.0 * 100 ) );
+                snprintf( line_str[0], 17, "Pres %d[hPa]  ", (int)( pres.pressure / 4096.0 ) );
                 i = snprintf( line_str[1], 17, "Temp %d[%cC]  ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
 
                 st7032i_puts( 0, 0, line_str[0] );
@@ -978,7 +975,7 @@ int main( void )
                 snprintf( line_str[0], 17, "Gy[dps] X%+06d", (int)( mpu9150.gyro_x * 0.01526 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mpu9150.gyro_y * 0.01526 ),
-                        (int)( mpu9150.gyro_z * 0.01526) );
+                        (int)( mpu9150.gyro_z * 0.01526 ) );
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
 
@@ -1043,7 +1040,7 @@ int main( void )
                         st7032i_puts( 1, 0, "Please wait" );
 
                         /* format */
-                        ret = micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 64, 0 );
+                        ret = micomfs_format( &fs, 512, sd_get_size() / sd_get_block_size(), 1024, 0 );
 
                         /* Put message */
                         st7032i_clear();
