@@ -29,15 +29,14 @@
  *
  */
 
-/*
-#define MICOMFS_ENABLE_EXFUNCTIONS
-*/
+// #define MICOMFS_ENABLE_EXFUNCTIONS
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 
+#define MICOMFS_API_VERSION_CODE "0.1"
 #define MICOMFS_SIGNATURE 0x5E
 #define MICOMFS_MAX_FILE_SECOTR_COUNT 0xFFFFFFFF
 #define MICOMFS_MAX_FILE_NAME_LENGTH  128
@@ -143,10 +142,12 @@ uint32_t micomfs_get_file_current_sector( MicomFSFile *fp );
 char micomfs_read_entry( MicomFS *fs, MicomFSFile *fp, uint16_t entry_id, const char *name );
 char micomfs_write_entry( MicomFSFile *fp );
 
-/* 以下PCとか大富豪用 */
+/* 拡張機能 */
+#ifdef MICOMFS_ENABLE_EXFUNCTIONS
 char micomfs_fdelete( MicomFS *fs, const char *name );
 char micomfs_clean_fs( MicomFS *fs );
 char micomfs_get_file_list( MicomFS *fs, MicomFSFile **list, uint16_t *count );
+#endif
 
 #ifdef __cplusplus
 }

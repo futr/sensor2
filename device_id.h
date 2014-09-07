@@ -2,7 +2,9 @@
 #define DEVICE_ID_H_INCLUDED
 
 #define DEVICE_LOG_SIGNATURE 0x8E   /* ログファイル先頭のシグネチャ */
-#define LOG_SIGNATURE 0x3E          /* ログファイルのデーターごとの先頭バイトシグネチャ */
+#define LOG_SIGNATURE_OLD 0x3E      /* ログファイルのデーターごとの先頭バイトシグネチャ (古い) */
+#define LOG_SIGNATURE 0xAE          /* ログファイルのデーターごとの先頭バイトシグネチャ */
+#define LOG_END_SIGNATURE 0xCE      /* ログデーター終了フラッグ */
 
 typedef enum {
     ID_ADXL345,

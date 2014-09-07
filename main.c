@@ -1,17 +1,6 @@
 /*
- * すること
- * ファイルシステムのチェック
- * たとえば、許容３にしてちゃんとエラーになるか、ダンプをみるとちゃんと構成されているか。
- * ファイルを書きながら終了した場合、全セクターリザーブされているので、エラーにならないとおかしい。
- *
- * センサーの更新感覚をもう少し遅く。
  *
  * 書き込みエラーが出た場合正常に終了する必要があるけど今は対策がないので作る
- *
- * LOG_SIGUNATUREが印字可能文字範囲にあるのは大いに問題
- * 変えるべき
- *
- * 上の仕様変更はリリース前に必ず行うこと
  *
  */
 
@@ -32,6 +21,7 @@
 #include "device_id.h"
 
 #define GPS_WRITE_UNIT 32       /* GPSデーターの最小書き込み単位 */
+#define PRESSURE_AVR   100      /* 気圧の平均に使うデーター数 */
 
 #define SW_STOP   _BV( PB7 )
 #define SW_START  _BV( PB6 )
@@ -42,7 +32,7 @@ static volatile uint32_t system_clock;  /* 100usごとにカウントされる�
 static uint16_t input_counter;
 static volatile uint8_t input;
 static FIFO gps_fifo;
-static char gps_buf[200];
+static char gps_buf[128];
 static char line_str[2][17];
 static volatile uint8_t battery_level;
 
@@ -232,6 +222,12 @@ int main( void )
     uint8_t before_input;
     uint8_t pushed_input;
 
+    int32_t base_pressure;
+    int64_t avr_pressure_buf;
+    int32_t avr_pressure;
+    int avr_pressure_counter;
+    int32_t height;
+
     LPS331APUnit pres;
     AK8975Unit mag;
     MPU9150Unit mpu9150;
@@ -336,6 +332,10 @@ int main( void )
     update_timer    = 0;
     max_fifo_level  = 0;
     battery_level   = 0;
+    base_pressure        = (int32_t)1013 * 4096;
+    avr_pressure         = base_pressure;
+    avr_pressure_buf     = 0;
+    avr_pressure_counter = 0;
 
     /* Init file name */
     strcpy( file_name, "log.log" );
@@ -779,7 +779,7 @@ int main( void )
         pushed_input = ~before_input & input;
         before_input = input;
 
-        if ( ( SW_START & pushed_input ) && ( display < DispFormat ) && !write_dev ) {
+        if ( ( SW_START & pushed_input ) && ( display < DispFormat ) && ( display != DispPressTemp ) && !write_dev ) {
             /* スタートが押されたらスタート画面へ */
             display = DispStartWrite;
 
@@ -815,6 +815,9 @@ int main( void )
             st7032i_clear();
         }
 
+        /* タイマーフラッグクリア */
+        timer_flags = 0;
+
         /* 0.1秒ごとに更新 */
         if ( now_system_clock > before_system_clock + 1000 ) {
             /* 前回時刻更新 */
@@ -825,9 +828,6 @@ int main( void )
         } else {
             sec_timer01 = 0;
         }
-
-        /* タイマーフラッグクリア */
-        timer_flags = 0;
 
         /* 1sec timer */
         if ( sec_timer01 ) {
@@ -847,6 +847,7 @@ int main( void )
             } else {
                 update_timer = 0;
 
+                /* センサーデーター表示更新 */
                 timer_flags |= TimerUpdate;
             }
         }
@@ -927,9 +928,31 @@ int main( void )
 
         case DispPressTemp:
             /* 気圧温度用 */
+            /* 平均気圧計算 */
+            if ( ( updated_dev & DEV_PRESS ) ) {
+                avr_pressure_buf += pres.pressure;
+                avr_pressure_counter++;
+
+                if ( avr_pressure_counter == PRESSURE_AVR ) {
+                    avr_pressure = avr_pressure_buf / PRESSURE_AVR;
+                    avr_pressure_counter = 0;
+                    avr_pressure_buf     = 0;
+                }
+            }
+
+             /* 気圧モートでスタートがおされた場合高度用基準気圧を更新 */
+            if ( pushed_input & SW_START ) {
+                base_pressure = avr_pressure;
+            }
+
             if ( display_changed || ( timer_flags & TimerUpdate ) ) {
-                snprintf( line_str[0], 17, "Pres %d[hPa]  ", (int)( pres.pressure / 4096.0 ) );
-                i = snprintf( line_str[1], 17, "Temp %d[%cC]  ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF );
+                /* 表示 */
+                /* 高さ計算 */
+                height = ( base_pressure - avr_pressure ) / 4096.0 * 1000;
+
+                /* 表示気圧も平均気圧 */
+                snprintf( line_str[0], 17, "Pres %ld[Pa]", (int32_t)( avr_pressure / 4096.0 * 100 ) );
+                snprintf( line_str[1], 17, "%02d[%cC] %ld[cm]    ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF, height );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -971,7 +994,7 @@ int main( void )
 
         case DispGyro:
             /* ジャイロ */
-            if ( display_changed || ( updated_dev & DEV_GYRO ) ) {
+            if ( display_changed || ( timer_flags & TimerUpdate ) ) {
                 snprintf( line_str[0], 17, "Gy[dps] X%+06d", (int)( mpu9150.gyro_x * 0.01526 ) );
                 snprintf( line_str[1], 17, "Y%+06d Z%+06d",
                         (int)( mpu9150.gyro_y * 0.01526 ),
@@ -1290,6 +1313,10 @@ int main( void )
                     st7032i_clear();
                     st7032i_puts( 0, 0, "Stop writing" );
                     st7032i_puts( 1, 0, "Please wait" );
+
+                    /* 終了シグネチャ書き込み */
+                    data = LOG_END_SIGNATURE;
+                    micomfs_seq_fwrite( &fp, &data, 1 );
 
                     /* Stop file writing */
                     ret  = micomfs_stop_fwrite( &fp, 0 );
