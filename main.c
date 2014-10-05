@@ -36,15 +36,6 @@ static char gps_buf[128];
 static char line_str[2][17];
 static volatile uint8_t battery_level;
 
-// DEBUG
-static void *sp;
-static void *bv = RAMEND;
-static uint16_t min_sp = RAMEND;
-static uint8_t fl_0, fl_0max;
-static uint8_t fl_1, fl_1max;
-static uint8_t fl_2, fl_2max;
-static uint8_t fl_3, fl_3max;
-
 typedef enum {
     OtherSentence,
     GPGGA,
@@ -99,21 +90,6 @@ ISR( TIMER0_COMPA_vect )
     } else {
         input_counter++;
     }
-
-    // DEBUG
-    /*
-    extern void *__brkval;
-    // extern void *__malloc_heap_start;
-    if ( __malloc_heap_start < bv ) {
-        bv = __malloc_heap_start;
-    }
-    */
-    // スタックポインタ保存
-    sp = SPL + SPH * 256;
-
-    if ( sp < min_sp ) {
-        min_sp = sp;
-    }
 }
 
 char get_battery_level( void )
@@ -141,8 +117,10 @@ char get_battery_level( void )
     /* Start conversion */
     ADCSRA |= _BV( ADSC );
 
-    if ( data < 65 ) {
-        /* V < 2.5 */
+    /* ADCH = ( 51 / ( 51 + 100 ) * VBAT ) / 3.3 * 256 */
+
+    if ( data < 69 ) {
+        /* V < 2.6 */
         return 0;
     } else if ( data < 79 ) {
         /* V < 3.0 */
@@ -255,8 +233,8 @@ int main( void )
     PORTD = 0xF0;
 
     /* ADC setting */
-    ADMUX  = 0x20;  /* ADC0, Left, AVcc */
-    ADCSRA = 0x86;  /* Enable, 1/64, Disable int, Disable Auto Trigger */
+    ADMUX  = 0x20;          /* ADC0, Left, AVcc */
+    ADCSRA = 0x86;          /* Enable, 1/64, Disable int, Disable Auto Trigger */
 
     /* タイマー0を初期化 */
     TCCR0B = 0x02;          /* プリスケール8，CTCモード */
@@ -270,11 +248,14 @@ int main( void )
     /* デバイス初期化 */
     enabled_dev = DEV_GPS;
 
-    if ( sd_init( SPIOscDiv2, 512, 0 ) ) {
+    /* SDとSPI初期化 外部プルアップの場合は上を有効 */
+    // if ( sd_init( SPIOscDiv2, 512, 0 ) ) {
+    if ( sd_init( SPIOscDiv2, 512, SPIMISO | SPIMOSI ) ) {
         enabled_dev |= DEV_SD;
     }
 
-    if ( lps331ap_init( &pres, 0x5D, LPS331AP25_25Hz, LPS331APPresAvg512, LPS331APTempAvg1 ) ) {
+    /* AN 384/128 DS 512/64 */
+    if ( lps331ap_init( &pres, 0x5D, LPS331AP25_25Hz, LPS331APPresAvg512, LPS331APTempAvg64 ) ) {
         enabled_dev |= DEV_PRESS;
     }
 
@@ -286,7 +267,7 @@ int main( void )
         enabled_dev |= DEV_MAG;
     }
 
-    st7032i_init();
+    st7032i_init( 0x25 );
 
     /* GPS用FIFO初期化 */
     fifo_init( &gps_fifo, gps_buf, sizeof( char ), 0, sizeof( gps_buf ) / sizeof( char ) );
@@ -360,9 +341,6 @@ int main( void )
         now_system_clock = system_clock;
         sei();
 
-        // DEBUG
-        fl_0 = fifo_level( &gps_fifo );
-
         /* センサー情報取得 */
         if ( ( enabled_dev & DEV_PRESS ) && lps331ap_data_ready( &pres ) ) {
             /* 気圧 */
@@ -390,11 +368,6 @@ int main( void )
 
             updated_dev |= ( DEV_ACC | DEV_GYRO | DEV_TEMP );
         }
-
-        // DEBUG
-        fl_0 = fifo_level( &gps_fifo ) - fl_0;
-        fl_1 = fifo_level( &gps_fifo );
-
 
         /* 必要なら各センサーデータ処理と書き込み */
         if ( ( write_dev & DEV_PRESS ) && ( updated_dev & DEV_PRESS ) ) {
@@ -463,16 +436,10 @@ int main( void )
             micomfs_seq_fwrite( &fp, &mpu9150.temp, sizeof( mpu9150.temp ) );
         }
 
-        // DEBUG
-        fl_1 = fifo_level( &gps_fifo ) - fl_1;
-
         /* 最大FIFO使用量記録 ほぼDEBUG用 */
         if ( ( fifo_level( &gps_fifo ) > max_fifo_level ) && display <= DispFormat ) {
             max_fifo_level = fifo_level( &gps_fifo );
         }
-
-        // DEBUG
-        fl_2 = fifo_level( &gps_fifo );
 
         /* GPSデーターが書きこみ単位以上たまってれば処理 */
         if ( ( enabled_dev & DEV_GPS ) && ( ( fifolevel = fifo_level( &gps_fifo ) ) >= GPS_WRITE_UNIT ) ) {
@@ -770,11 +737,8 @@ int main( void )
             }
         }
 
-        // DBEUG
-        fl_2 = fifo_level( &gps_fifo ) - fl_2;
-        fl_3 = fifo_level( &gps_fifo );
-
         /* スイッチ処理 */
+
         /* 押されたスイッチを調べる */
         pushed_input = ~before_input & input;
         before_input = input;
@@ -871,7 +835,7 @@ int main( void )
         }
 
         /* 書き込み中にバッテリレベルが低下したので書き込み中止 */
-        if ( write_dev && ( battery_level <= 1 ) ) {
+        if ( write_dev && ( battery_level < 1 ) ) {
             /* Stop file writing */
             micomfs_stop_fwrite( &fp, 0 );
             micomfs_fclose( &fp );
@@ -948,10 +912,12 @@ int main( void )
             if ( display_changed || ( timer_flags & TimerUpdate ) ) {
                 /* 表示 */
                 /* 高さ計算 */
-                height = ( base_pressure - avr_pressure ) / 4096.0 * 1000;
+                // DBEUG
+                height = ( base_pressure - avr_pressure ) / 4096.0 * 835;
+                // height = ( base_pressure - pres.pressure ) / 4096.0 * 835;
 
                 /* 表示気圧も平均気圧 */
-                snprintf( line_str[0], 17, "Pres %ld[Pa]", (int32_t)( avr_pressure / 4096.0 * 100 ) );
+                snprintf( line_str[0], 17, "Pres %ld[Pa] ", (int32_t)( pres.pressure / 4096.0 * 100 ) );
                 snprintf( line_str[1], 17, "%02d[%cC] %ld[cm]    ", (int)mpu9150_get_temp_in_c( &mpu9150 ), 0xDF, height );
 
                 st7032i_puts( 0, 0, line_str[0] );
@@ -1015,22 +981,11 @@ int main( void )
 
                 snprintf( line_str[0], 17, "CLK:%lu", now_system_clock );
 
-                // DEBUG
-                /*
                 if ( write_dev ) {
-                    snprintf( line_str[1], 17, "%s:%d%% %d %p",
-                            file_name,
-                            (int)( (float)fp.current_sector / fp.max_sector_count * 100 ),
-                            max_fifo_level,
-                            min_sp );
+                    snprintf( line_str[1], 17, "%s %d", file_name, max_fifo_level );
+                } else {
+                    snprintf( line_str[1], 17, "%d", max_fifo_level );
                 }
-                */
-                /*
-                snprintf( line_str[1], 17, "%d %u %u",
-                        max_fifo_level,
-                        min_sp, bv );
-                */
-                snprintf( line_str[1], 17, "%d %d %d %d", fl_0max, fl_1max, fl_2max, fl_3max );
 
                 st7032i_puts( 0, 0, line_str[0] );
                 st7032i_puts( 1, 0, line_str[1] );
@@ -1115,7 +1070,7 @@ int main( void )
                 /* Check keys */
                 if ( pushed_input & SW_START ) {
 
-                    if ( battery_level <= 1 ) {
+                    if ( battery_level < 1 ) {
                         /* バッテリーが電圧不足だと安全のため実行できない */
                         st7032i_clear();
                         st7032i_puts( 0, 0, "Writing failed!" );
@@ -1358,23 +1313,7 @@ int main( void )
         default:
             break;
         }
-
-        // DEBUG
-        fl_3 = fifo_level( &gps_fifo ) - fl_3;
-        if ( fl_0 > fl_0max ) {
-            fl_0max = fl_0;
-        }
-        if ( fl_1 > fl_1max ) {
-            fl_1max = fl_1;
-        }
-        if ( fl_2 > fl_2max ) {
-            fl_2max = fl_2;
-        }
-        if ( fl_3 > fl_3max ) {
-            fl_3max = fl_3;
-        }
     }
-
 
     /* 終了 */
     return 0;

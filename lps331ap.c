@@ -133,3 +133,18 @@ char lps331ap_read_temp( LPS331APUnit *unit )
 
     return 1;
 }
+
+
+char lps331ap_one_shot( LPS331APUnit *unit )
+{
+    /* Start one shot acquisition */
+    uint8_t data;
+
+    data = 0x01;
+
+    if ( !i2c_write_register( unit->address, 0x21, &data, 1, I2CPolling ) ) {
+        return 0;
+    }
+
+    return 1;
+}

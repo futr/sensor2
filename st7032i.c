@@ -1,6 +1,6 @@
 #include "st7032i.h"
 
-void st7032i_init( void )
+void st7032i_init( uint8_t contrast )
 {
     /* 液晶を初期化 */
     uint8_t data;
@@ -24,13 +24,13 @@ void st7032i_init( void )
     _delay_ms( 1 );
 
     /* contrast set */
-    data = 0x70;
+    data = 0x70 | ( contrast & 0x0F );
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
     _delay_ms( 1 );
 
     /* Power-Icon-Contrast control */
-    data = 0x5E;
+    data = 0x5C | ( ( contrast >> 4 ) & 0x03 );
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
     _delay_ms( 1 );

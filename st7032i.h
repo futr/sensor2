@@ -1,6 +1,11 @@
 #ifndef ST7032I_H_INCLUDED
 #define ST7032I_H_INCLUDED
 
+/*
+ * 3.3Vではcontrastを0x24から0x26くらいにすると良いようです
+ *
+ */
+
 #include "i2c.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -43,7 +48,7 @@ typedef enum {
     ST7032IIconMoney     = 0xF8,
 } ST7032IIcon;
 
-void st7032i_init( void );
+void st7032i_init( uint8_t contrast );
 void st7032i_set_icon( ST7032IIconAddr address, ST7032IIcon on );
 void st7032i_set_char( char line, char pos, char character );
 void st7032i_puts( char line, char pos, char *str );

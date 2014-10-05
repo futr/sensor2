@@ -67,6 +67,7 @@ extern "C" {
 char lps331ap_init( LPS331APUnit *unit, uint8_t address, LPS331APDataRate rate, LPS331APPresAvg pres_avg, LPS331APTempAvg temp_avg );
 char lps331ap_start( LPS331APUnit *unit );
 char lps331ap_stop( LPS331APUnit *unit );
+char lps331ap_one_shot( LPS331APUnit *unit );
 char lps331ap_data_ready( LPS331APUnit *unit );
 char lps331ap_temp_data_ready( LPS331APUnit *unit );
 char lps331ap_read( LPS331APUnit *unit );
