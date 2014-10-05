@@ -32,7 +32,7 @@ static volatile uint32_t system_clock;  /* 100usごとにカウントされる�
 static uint16_t input_counter;
 static volatile uint8_t input;
 static FIFO gps_fifo;
-static char gps_buf[128];
+static char gps_buf[200];
 static char line_str[2][17];
 static volatile uint8_t battery_level;
 
