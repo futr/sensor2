@@ -267,7 +267,8 @@ int main( void )
         enabled_dev |= DEV_MAG;
     }
 
-    st7032i_init( 0x25 );
+    /* Init display 0x25 0x2B */
+    st7032i_init( 0x2B );
 
     /* GPS用FIFO初期化 */
     fifo_init( &gps_fifo, gps_buf, sizeof( char ), 0, sizeof( gps_buf ) / sizeof( char ) );
