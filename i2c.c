@@ -17,11 +17,11 @@ void i2c_init_master( uint8_t baud, I2CPrescale prescale, I2CPin pullup, char in
         break;
 
     case I2CPrescale4:
-        TWSR = 2;
+        TWSR = 1;
         break;
 
     case I2CPrescale16:
-        TWSR = 3;
+        TWSR = 2;
         break;
 
     case I2CPrescale64:

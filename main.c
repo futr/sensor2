@@ -119,18 +119,34 @@ char get_battery_level( void )
 
     /* ADCH = ( 51 / ( 51 + 100 ) * VBAT ) / 3.3 * 256 */
 
-    if ( data < 69 ) {
-        /* V < 2.6 */
+    // 4.0 to 5.0
+    if ( data < 104 ) {
+        /* V < 4.0 */
         return 0;
-    } else if ( data < 79 ) {
-        /* V < 3.0 */
+    } else if ( data < 117 ) {
+        /* V < 4.5 */
         return 1;
-    } else if ( data < 86 ) {
-        /* V < 3.3 */
+    } else if ( data < 131 ) {
+        /* V < 5.0 */
         return 2;
     } else {
         return 3;
     }
+
+//    // 3.3 to 2.6
+//    if ( data < 69 ) {
+//        /* V < 2.6 */
+//        return 0;
+//    } else if ( data < 79 ) {
+//        /* V < 3.0 */
+//        return 1;
+//    } else if ( data < 86 ) {
+//        /* V < 3.3 */
+//        return 2;
+//    } else {
+//        return 3;
+//    }
+
 }
 
 void display_battery_level( void )
@@ -183,6 +199,7 @@ int main( void )
     char display_changed;
 
     char file_name[16];
+    char filename_updated;
 
     char elem_buf[16];
     uint8_t elem_pos;
@@ -321,6 +338,8 @@ int main( void )
 
     /* Init file name */
     strcpy( file_name, "log.log" );
+
+    filename_updated = 0;
 
     /* ピン入力初期化 */
     input = ~PIND;
@@ -528,6 +547,9 @@ int main( void )
                                     file_name[8]  = 'o';
                                     file_name[9]  = 'g';
                                     file_name[10] = '\0';
+
+                                    /* Set filename updated flag */
+                                    filename_updated = 1;
                                 }
 
                                 break;
@@ -1079,9 +1101,17 @@ int main( void )
                     } else if ( write_dev_buf ) {
                         /* 開始するたびにFS初期化とファイル作成 */
                         ret  = micomfs_init_fs( &fs );
+
+                        /* Check filename is updated */
+                        if ( !filename_updated ) {
+                            /* Set filename as log[entry-id].log */
+                            snprintf( file_name, sizeof( file_name ), "log%d.log", (int)fs.used_entry_count );
+                        }
+
+                        /* Create a file */
                         ret *= micomfs_fcreate( &fs, &fp, file_name, MICOMFS_MAX_FILE_SECOTR_COUNT );
 
-                        /* Create file */
+                        /* Create header */
                         if ( !ret ) {
                             /* ファイルの確保失敗 */
                             st7032i_clear();

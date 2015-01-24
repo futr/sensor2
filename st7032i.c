@@ -18,7 +18,9 @@ void st7032i_init( uint8_t contrast )
     _delay_ms( 1 );
 
     /* Internal OSC Freq */
-    data = 0x14;
+    /* 表示が安定しない場合フレーム周波数を上げると安定する場合がある */
+    // data = 0x14;
+    data = 0x16;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
     _delay_ms( 1 );
@@ -51,6 +53,8 @@ void st7032i_init( uint8_t contrast )
     data = 0x0C;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
+    _delay_ms( 1 );
+
     /* Clear */
     data = 0x01;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
@@ -80,7 +84,6 @@ void st7032i_puts( char line, char pos, char *str )
     /* 1行出力 */
     uint8_t data;
     uint8_t addr;
-    int i;
 
     /* アドレス指定 */
     addr = line * 40 + pos;
@@ -88,11 +91,21 @@ void st7032i_puts( char line, char pos, char *str )
     data = 0x80 | addr;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
+    /* Wait */
+    _delay_us( 50 );
+
     /* 書き込み */
+    i2c_write_register( ST7032IAddress, 0x40, (uint8_t *)str, strlen( str ), I2CPolling );
+    /*
     for ( i = 0; str[i] != '\0'; i++ ) {
         data = str[i];
+
         i2c_write_register( ST7032IAddress, 0x40, &data, 1, I2CPolling );
     }
+    */
+
+    /* Wait */
+    _delay_us( 50 );
 }
 
 void st7032i_clear( void )
@@ -103,7 +116,7 @@ void st7032i_clear( void )
     data = 0x01;
     i2c_write_register( ST7032IAddress, 0x00, &data, 1, I2CPolling );
 
-    _delay_ms( 1 );
+    _delay_ms( 2 );
 }
 
 void st7032i_set_icon( ST7032IIconAddr address, ST7032IIcon on )
