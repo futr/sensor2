@@ -494,7 +494,9 @@ int main( void )
                 }
 
                 /* 必要ならエレメント分解 */
-                if ( display == DispGPS1 || display == DispGPS2 ) {
+                // DEBUG 常に処理するようにした
+                if ( 1 ) {
+                // if ( display == DispGPS1 || display == DispGPS2 || write_dev == 0 ) {
                     elem_buf[elem_pos] = data;
                     elem_pos++;
 
