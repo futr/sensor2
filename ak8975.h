@@ -24,6 +24,7 @@ char ak8975_data_ready( AK8975Unit *unit );
 char ak8975_over_flow( AK8975Unit *unit );
 char ak8975_read( AK8975Unit *unit );
 void ak8975_calc_adjusted_h( AK8975Unit *unit );
+char ak8975_self_test( AK8975Unit *unit );
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-# Linux&Mac用avr-gcc用
+# Linux,Mac,Windows用avr-gcc用
 # 最後に出力される text + data がプログラムメモリーの使用量です．
 
 # デバイスと周波数[Hz]
@@ -11,7 +11,7 @@ HFUSE  = 0xd9
 EFUSE  = 0x07
 
 # ソースコードと出力ファイル
-CSOURCES = main.c micomfs.c micomfs_dev.c fifo.c mpu9150.c ak8975.c usart.c i2c.c st7032i.c sd.c spi.c lps331ap.c debug.c
+CSOURCES = main.c micomfs.c micomfs_dev.c fifo.c mpu9150.c ak8975.c usart.c i2c.c st7032i.c sd.c spi.c lps331ap.c
 SSOURCES =
 TARGET   = main
 
@@ -28,8 +28,12 @@ OBJDUMP = avr-objdump
 OBJCOPY = avr-objcopy
 SIZE    = avr-size
 AVRDUDE = avrdude
-SUDO    = sudo
 SIM     = ../../usr/bin/simulavr
+ifeq ($(OS),Windows_NT)
+    SUDO = 
+else
+    SUDO = sudo
+endif
 
 # 偽ルールとオブジェクトファイル保持
 .PRECIOUS : $(CSOURCES:.c=.o)

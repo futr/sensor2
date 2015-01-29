@@ -23,10 +23,10 @@
 #define GPS_WRITE_UNIT 32       /* GPSデーターの最小書き込み単位 */
 #define PRESSURE_AVR   100      /* 気圧の平均に使うデーター数 */
 
-#define SW_STOP   _BV( PB7 )
-#define SW_START  _BV( PB6 )
-#define SW_TOGGLE _BV( PB4 )
-#define SW_NEXT   _BV( PB5 )
+#define SW_STOP   _BV( PD7 )
+#define SW_START  _BV( PD6 )
+#define SW_TOGGLE _BV( PD4 )
+#define SW_NEXT   _BV( PD5 )
 
 static volatile uint32_t system_clock;  /* 100usごとにカウントされるタイマー */
 static uint16_t input_counter;
@@ -242,12 +242,14 @@ int main( void )
     cli();
 
     /* ポート向き初期化 */
-    DDRD = 0x0F;    /* PD4-7 : 入力 */
-    DDRC = 0xFE;    /* PC0   : ADC ( = 入力 ADCに出力するとその出力をADCしてしまう ) */
-    DDRB = 0xFF;    /* PB0   : 液晶ライト */
+    DDRD = 0x00;    /* PD4-7 : 入力 */
+    DDRC = 0x00;    /* PC0   : ADC ( = 入力 ADCに出力するとその出力をADCしてしまう ) */
+    DDRB = 0x01;    /* PB0   : 液晶ライト */
 
     /* 入力プルアップ指定 */
-    PORTD = 0xF0;
+    PORTB = 0xFF;
+    PORTC = 0xFE;
+    PORTD = 0xFF;
 
     /* ADC setting */
     ADMUX  = 0x20;          /* ADC0, Left, AVcc */
@@ -259,8 +261,8 @@ int main( void )
     TIMSK0 = 0x02;          /* コンペアマッチA割り込み有効 */
     OCR0A  = 100;           /* 100usごとに割りこみ発生 */
 
-    /* I2Cバス初期化 */
-    i2c_init_master( 32, I2CPrescale1, 0, 0 );
+    /* I2Cバス初期化 ( 2 = 363kHz, 10 = 222kHz, 32 = 100kHz ) */
+    i2c_init_master( 20, I2CPrescale1, 0, 0 );
 
     /* デバイス初期化 */
     enabled_dev = DEV_GPS;
@@ -280,7 +282,7 @@ int main( void )
         enabled_dev |= DEV_GYRO | DEV_ACC;
     }
 
-    if ( ak8975_init( &mag, 0x0C ) ) {
+    if ( ak8975_init( &mag, 0x0C ) && ak8975_self_test( &mag ) ) {
         enabled_dev |= DEV_MAG;
     }
 
