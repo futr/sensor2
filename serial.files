@@ -24,7 +24,6 @@ hmc5883l.c
 device_id.h
 st7032i.h
 st7032i.c
-
 micomfs.c
 micomfs.h
 ak8975.c
